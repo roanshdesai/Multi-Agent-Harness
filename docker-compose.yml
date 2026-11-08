@@ -1,0 +1,24 @@
+services:
+  harness:
+    build: .
+    stdin_open: true
+    tty: true
+    env_file: .env
+    environment:
+      HINDSIGHT_MCP_URL: http://hindsight:8888/mcp/
+    volumes:
+      - ./workspace:/workspace          # the only host folder agents can touch
+      - ./design-library:/app/design-library:ro
+      - ./vendor:/app/vendor:ro
+      - harness-claude:/home/agent/.claude
+    depends_on: [hindsight]
+
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight:latest
+    env_file: .env
+    ports: ["8888:8888"]
+    volumes: [hindsight-data:/home/hindsight/.pg0]
+
+volumes:
+  harness-claude:
+  hindsight-data:

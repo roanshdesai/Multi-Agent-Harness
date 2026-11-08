@@ -1,0 +1,3 @@
+name: design-library
+prompt: What references are in my design library? List them.
+contains: ["example.com"]

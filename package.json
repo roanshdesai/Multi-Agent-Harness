@@ -1,0 +1,39 @@
+{
+  "name": "agent-harness",
+  "version": "0.1.0",
+  "description": "Multi-model agent harness: Opus orchestrator, Fable advisor/coder, Sonnet workers, GPT-6 Astra GUI tests",
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "dev": "tsx src/cli.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "eval": "tsx src/cli.ts eval",
+    "setup": "bash scripts/setup.sh",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/roanshdesai/test.git"
+  },
+  "bugs": {
+    "url": "https://github.com/roanshdesai/test/issues"
+  },
+  "homepage": "https://github.com/roanshdesai/test#readme",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.319",
+    "openai": "^7.53.0",
+    "playwright": "^1.65.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "type": "module",
+  "private": true,
+  "bin": {
+    "harness": "dist/cli.js"
+  }
+}

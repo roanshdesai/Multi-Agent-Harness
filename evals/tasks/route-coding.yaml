@@ -1,0 +1,4 @@
+name: route-coding
+prompt: In a temp directory, write a TypeScript function isPalindrome(s) that ignores case and punctuation, with a test, and run the test. Show the function, the test, and the test output.
+expect_agent: coder
+judge: The answer shows the function, a test, and real test output that passes.

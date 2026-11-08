@@ -1,0 +1,53 @@
+# Harness configuration. Environment variables in ${VAR} form are expanded.
+
+models:
+  main: claude-opus-5-5          # orchestrator
+  advisor: claude-fable-5-1      # second opinion, used when stuck
+  coder: claude-fable-5-1        # all coding work
+  worker: claude-sonnet-5-5      # scraping, research, general tasks
+  triage: claude-sonnet-5-5      # summarize / compress scraped content (upgraded from Haiku)
+  video: claude-opus-5-5
+  verifier: claude-fable-5-1     # checks worker output before it is accepted
+  gui: gpt-6-astra               # OpenAI model that drives GUI tests
+  # Fallback chain (item 10): tried in order if the primary is overloaded/unavailable
+  fallback: [claude-opus-5-5, claude-sonnet-5-5]
+
+effort:
+  main: high
+  advisor: xhigh
+  coder: xhigh
+  worker: medium
+  verifier: high
+
+# Escalate to the Fable advisor after this many consecutive tool failures
+stuck_after_failures: 3
+
+verify:
+  enabled: true
+  max_rounds: 2                  # how many times the verifier can send work back
+
+approvals:
+  # Only GitHub pushes need human approval. Everything else runs automatically.
+  github_push: ask
+  # Pushing to these branches is refused outright (your "never push to main" rule)
+  protected_branches: [main, master]
+
+sandbox:
+  enabled: true                  # sandbox Bash (bubblewrap on Linux, Seatbelt on macOS)
+  fail_if_unavailable: false
+
+design_library: ./design-library/links.yaml
+
+plugins_dir: ./vendor/plugins    # superpowers, claude-mem (installed by scripts/setup.sh)
+
+chats_dir: ./.harness/chats
+
+mcp:
+  github: true
+  slack: true
+  outlook: true
+  hindsight: true
+  firecrawl: true
+  exa: true
+  context7: true
+  playwright: true

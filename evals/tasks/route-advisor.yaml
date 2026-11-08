@@ -1,0 +1,4 @@
+name: route-advisor
+prompt: Ask your advisor whether a small team should pick Postgres or DynamoDB for a multi-tenant SaaS with heavy reporting, and give its recommendation.
+expect_agent: advisor
+judge: Gives one clear recommendation with reasons tied to multi-tenancy and reporting.

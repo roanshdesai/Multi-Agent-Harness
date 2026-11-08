@@ -1,0 +1,4 @@
+name: route-research
+prompt: Find the current stable version of Node.js and its release date. Cite the source.
+expect_agent: researcher
+regex: ["v?\\d+\\.\\d+\\.\\d+", "https?://"]

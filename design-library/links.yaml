@@ -1,0 +1,7 @@
+# Your design links library. The design agent searches this before any UI work.
+# Add as many entries as you like; tags drive the search.
+links:
+  - title: Example — replace me
+    url: https://example.com
+    tags: [landing, hero, dark]
+    notes: Why this reference is good.
