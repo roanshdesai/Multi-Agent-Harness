@@ -36,7 +36,7 @@ sandbox:
   enabled: true                  # sandbox Bash (bubblewrap on Linux, Seatbelt on macOS)
   fail_if_unavailable: false
 
-design_library: ./design-library/links.yaml
+design_library: ./design-library/UI-LINKS.md   # Markdown, YAML or a plain URL list
 
 plugins_dir: ./vendor/plugins    # superpowers, claude-mem (installed by scripts/setup.sh)
 

@@ -1,0 +1,3 @@
+name: design-library-swift
+prompt: I'm building a SwiftUI iOS app and need toasts and a progressive blur. Which references from my design library fit? Just list them.
+regex: ["Drops|PopupView", "Glur"]

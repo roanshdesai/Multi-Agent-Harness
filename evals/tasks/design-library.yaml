@@ -1,3 +1,4 @@
 name: design-library
-prompt: What references are in my design library? List them.
-contains: ["example.com"]
+prompt: I'm building a web landing page. Which animated component libraries from my design library should I use? Just list them.
+contains: ["Magic UI", "SmoothUI"]
+regex: ["^(?![\\s\\S]*Human Interface Guidelines)"]

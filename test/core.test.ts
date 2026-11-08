@@ -65,3 +65,22 @@ test("plugin discovery finds nested .claude-plugin dirs", () => {
   const found = discoverPlugins(root).map((p) => p.path.replace(root + "/", "")).sort();
   assert.deepEqual(found, ["claude-mem/plugin", "superpowers"]);
 });
+
+test("UI-LINKS.md: parses sections, notes, and hides Swift-only refs for web work", async () => {
+  const { filterByPlatform } = await import("../src/tools/design-library.js");
+  const links = loadDesignLinks(join(process.cwd(), "design-library", "UI-LINKS.md"));
+  assert.equal(links.length, 30);
+  const magic = links.find((l) => l.title === "Magic UI")!;
+  assert.equal(magic.url, "https://magicui.design/docs/components");
+  assert.match(magic.notes ?? "", /animated React\/Tailwind/);
+  assert.equal(magic.swiftOnly, false);
+  assert.ok(links.find((l) => l.title === "joogps/Glur")!.swiftOnly);
+  assert.ok(links.find((l) => l.title.startsWith("Apple Human"))!.swiftOnly);
+
+  const web = filterByPlatform(links, "web");
+  assert.equal(web.length, 17);
+  assert.ok(!web.some((l) => l.swiftOnly));
+  assert.equal(filterByPlatform(links, "web", "swiftui toast").length, 30); // query mentions Swift
+  assert.deepEqual(searchDesignLinks(filterByPlatform(links, "swift"), "toasts").slice(0, 2).map((l) => l.title).sort(), ["exyte/PopupView", "omaralbeik/Drops"]);
+  assert.ok(searchDesignLinks(web, "smooth scrolling").some((l) => l.title === "Lenis"));
+});

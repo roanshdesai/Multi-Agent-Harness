@@ -20,6 +20,15 @@ mkdir -p "$HOME/.claude/skills"
 clone garrytan/gstack "$HOME/.claude/skills/gstack"
 if [ -x "$HOME/.claude/skills/gstack/setup" ]; then (cd "$HOME/.claude/skills/gstack" && ./setup) || echo "  (gstack ./setup failed; it needs bun — https://bun.sh)"; fi
 
+echo "→ taste-skill (design skills from your UI links library)"
+clone Leonxlnx/taste-skill "$ROOT/vendor/taste-skill"
+# Copy every folder that holds a SKILL.md into ~/.claude/skills
+find "$ROOT/vendor/taste-skill" -name SKILL.md -not -path "*/node_modules/*" | while read -r f; do
+  d="$(dirname "$f")"; n="$(basename "$d")"
+  [ "$d" = "$ROOT/vendor/taste-skill" ] && n="taste-skill"
+  rm -rf "$HOME/.claude/skills/$n" && cp -R "$d" "$HOME/.claude/skills/$n" && echo "  installed skill: $n"
+done
+
 echo "→ Playwright browser for gui_test"
 npx --yes playwright install chromium
 

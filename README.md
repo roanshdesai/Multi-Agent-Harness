@@ -15,13 +15,13 @@ A standalone terminal app built on the Claude Agent SDK. You chat with one orche
 
 If Opus is overloaded or unavailable, the orchestrator falls back to `claude-opus-5-5`, then `claude-sonnet-5-5` (set in `models.fallback`).
 
-**Memory:** Hindsight (MCP) and claude-mem (plugin). **Skills:** Superpowers (plugin) and gstack (`~/.claude/skills`). **Integrations:** GitHub, Slack, Outlook, Firecrawl, Exa, Context7 and Playwright. **Design:** the `design_library` tool searches `design-library/links.yaml`.
+**Memory:** Hindsight (MCP) and claude-mem (plugin). **Skills:** Superpowers (plugin) and gstack (`~/.claude/skills`). **Integrations:** GitHub, Slack, Outlook, Firecrawl, Exa, Context7 and Playwright. **Design:** the `design_library` tool searches your UI links file, `design-library/UI-LINKS.md`. Keep adding links under the right `##` heading. Sections marked *(only use if building with swift)* are hidden unless the work is SwiftUI/iOS. Your `taste-skill` skills are installed by `npm run setup`.
 
 ## Setup
 
 ```bash
 npm install
-npm run setup             # installs superpowers, claude-mem, gstack and Chromium
+npm run setup             # installs superpowers, claude-mem, gstack, taste-skill and Chromium
 cp .env.example .env      # then fill in your keys
 docker compose up -d hindsight
 npm start
@@ -37,7 +37,7 @@ Each MCP server is only loaded once its keys are in `.env`. `/status` shows whic
 | `/btw <q>` | Asks a side question on a throwaway copy of the chat. Works while a turn is running and never changes the main chat. |
 | `/new` `/chats` `/resume <id or #>` `/rename` `/compact` `/stop` | Manage chats |
 | `/advisor` `/code` `/research` `/test` `/video` | Send a task straight to one specialist |
-| `/design <q>` | Search your design library |
+| `/design [q]` | Search your UI links (include `swift` to see the SwiftUI ones) |
 | `/remember` `/recall` | Save to or search long-term memory |
 | `/status` `/agents` `/model` `/verify on\|off` `/eval` | Inspect and control the harness |
 

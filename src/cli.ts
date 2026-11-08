@@ -13,7 +13,7 @@ import {
 import { loadConfig } from "./config.js";
 import { Harness, type TurnResult } from "./session.js";
 import { buildAgents } from "./agents.js";
-import { loadDesignLinks, searchDesignLinks } from "./tools/design-library.js";
+import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "./tools/design-library.js";
 import { openInNewTerminal, resumeCommand } from "./terminal.js";
 import { runEvals } from "./eval.js";
 
@@ -154,7 +154,7 @@ ${c.bold("Chat")}
 ${c.bold("Delegation shortcuts")}
   /advisor <q>            ask the Fable advisor     /code <task>     Fable coder
   /research <q>           Sonnet researcher         /test <url> <checklist>   GUI test (GPT-6 Astra)
-  /video <task>           Opus video agent          /design <query>  search your design library
+  /video <task>           Opus video agent          /design [query]  search your UI links (add 'swift' for SwiftUI)
   /remember <fact>        save to Hindsight         /recall <q>      search memory
 ${c.bold("Harness")}
   /status  /agents  /model [id]  /verify on|off  /eval [filter]  /help  /exit
@@ -257,8 +257,12 @@ async function command(line: string): Promise<boolean> {
       for (const [name, a] of Object.entries(buildAgents(cfg))) console.log(`${c.cyan(name.padEnd(12))} ${c.dim(a.model ?? "")}  ${a.description}`);
       return true;
     case "/design": {
-      const hits = searchDesignLinks(loadDesignLinks(cfg.design_library), arg, 20);
-      console.log(hits.map((h) => `- ${h.title}  ${c.dim(h.url)}`).join("\n") || c.dim("No matches."));
+      // "/design swift toast" includes Swift-only references; otherwise they're hidden
+      const links = filterByPlatform(loadDesignLinks(cfg.design_library), "web", arg);
+      const hits = arg ? searchDesignLinks(links, arg, 20) : links;
+      console.log(
+        hits.map((h) => `- ${h.title}  ${c.dim(h.url)}${h.section ? c.dim(`  [${h.section}]`) : ""}`).join("\n") || c.dim("No matches."),
+      );
       return true;
     }
     case "/eval":
