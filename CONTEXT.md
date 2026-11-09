@@ -41,6 +41,7 @@ src/engine.ts        ChatEngine (one Claude chat): turns, queue, verifier loop, 
                      /change, questions, history (hides internal notices); the Engine interface
 src/gpt-chat.ts      GptChat: the same Engine interface over Codex; transcripts in .harness/gpt-chats
 src/codex.ts         runCodex(): `codex exec --json`, parses thread/item/turn events
+src/codex-usage.ts   ChatGPT plan usage: `codex app-server`, initialize, then account/rateLimits/read
 src/host.ts          Host: open tabs (each with its own engine), usage-limit fallback to GPT,
                      files touched by agents
 src/bridge.ts        Unix socket ~/.agent-harness/bridge.sock (named pipe on Windows), NDJSON;
@@ -79,7 +80,7 @@ Tabs (parallel tasks) · `@app` mentions (type @ in the composer to name a conne
 
 ```bash
 npm install
-npx tsc --noEmit && npm test          # 25 unit tests
+npx tsc --noEmit && npm test          # 26 unit tests
 HARNESS_ALLOW_API=1 npm start         # only in containers without a subscription
 ```
 
@@ -89,6 +90,7 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 
 ## Not verified yet (needs the owner's Mac)
 
+- ChatGPT usage from a real ChatGPT login (`account/rateLimits/read`, Codex 0.167 app server). Tested only with the fake Codex.
 - Real GPT runs through Codex. The test container can't reach OpenAI. Check that `gpt-6-astra` and `gpt-6.1-sol` are the names Codex accepts; if not, change them in `harness.config.yaml`.
 - Real image generation (Codex `image_generation` feature).
 - Running on a Claude subscription login. Containers had API billing, so `HARNESS_ALLOW_API=1` was used.

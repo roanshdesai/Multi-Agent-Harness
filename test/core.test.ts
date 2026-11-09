@@ -429,6 +429,25 @@ test("@apps: a named app reaches the model as an instruction; the shown message 
   delete process.env.HARNESS_CODEX_BIN;
 });
 
+test("ChatGPT usage: read from Codex's app server and shown like Claude's", async () => {
+  const { fromCodexRateLimits, readCodexUsage } = await import("../src/codex-usage.js");
+  const { isExhausted } = await import("../src/usage.js");
+  const now = Math.floor(Date.now() / 1000);
+  const snap = fromCodexRateLimits({ rateLimits: { planType: "pro", primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: now + 60 }, secondary: { usedPercent: 50, windowDurationMins: 10080, resetsAt: now + 600 } } }, 0.8)!;
+  assert.deepEqual(snap.windows.map((w) => [w.label, w.utilization]), [["5-hour limit", 0.25], ["Weekly limit", 0.5]]);
+  assert.equal(snap.plan, "pro");
+  assert.equal(isExhausted(snap), false);
+  assert.equal(isExhausted(fromCodexRateLimits({ rateLimits: { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: now + 60 } } })), true);
+  assert.equal(fromCodexRateLimits({ rateLimits: {} }), null);
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const live = await readCodexUsage(process.cwd(), { timeoutMs: 8000 });
+  assert.ok(live, "the fake Codex answered");
+  assert.deepEqual(live!.windows.map((w) => Math.round((w.utilization ?? 0) * 100)), [12, 40]);
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "does-not-exist");
+  assert.equal(await readCodexUsage(process.cwd(), { timeoutMs: 3000 }), null); // missing Codex: no crash, no data
+  delete process.env.HARNESS_CODEX_BIN;
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

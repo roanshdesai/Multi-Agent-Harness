@@ -17,6 +17,7 @@ import { upsertSubagents, removeSubagent } from "./subagents.js";
 import type { TabInfo } from "./host.js";
 import type { AgentQuestion } from "./session.js";
 import { describeUsage, isExhausted, formatReset } from "./usage.js";
+import { readCodexUsage } from "./codex-usage.js";
 import { saveCustomServer, removeCustomServer, setDisabled, parseServerSpec } from "./connections.js";
 import { listDocs, summarizeDoc } from "./docs.js";
 import type { ContextInfo } from "./session.js";
@@ -516,11 +517,14 @@ async function command(line: string): Promise<boolean> {
       console.log(`Verifier ${harness.verifyEnabled ? "on" : "off"}.`);
       return true;
     case "/usage": {
-      const u = bridge ? await bridge.request("usage") : harness.usage;
+      const u = bridge ? await bridge.request("usage") : await harness.refreshUsage();
       console.log(c.bold("Claude plan"));
       for (const l of describeUsage(u)) console.log(`  ${l}`);
       const codex = codexStatus(cfg.root);
-      console.log(c.bold("ChatGPT plan") + `\n  ${codex.ok ? `Signed in · ${cfg.models.gpt.join(", ")}` : codex.detail}`);
+      const gu = codex.ok ? await readCodexUsage(cfg.root, { warnAt: cfg.limits.warn_at }) : null;
+      console.log(c.bold(`ChatGPT plan${gu?.plan ? ` · ${gu.plan}` : ""}`));
+      if (gu) for (const l of describeUsage(gu).slice(0, -1)) console.log(`  ${l}`);
+      else console.log(`  ${codex.ok ? `Signed in · ${cfg.models.gpt.join(", ")}. Codex didn't report usage.` : codex.detail}`);
       console.log(c.dim(cfg.limits.fallback_to_gpt ? `If Claude runs out, the task continues on ${cfg.models.gpt[0]}.` : "Automatic switch to GPT is off (limits.fallback_to_gpt)."));
       return true;
     }

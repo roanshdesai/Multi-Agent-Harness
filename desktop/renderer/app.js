@@ -690,14 +690,29 @@ function renderStatus() {
     su.className = `inst${usageState.limited ? " bad" : pct >= 80 ? " warn" : ""}`;
     su.title = `${w.label}: ${pct}%${w.resetsAt ? `, resets ${fmtTime(w.resetsAt)}` : ""}. Click for details.`;
   } else uv.textContent = info?.subscriptionOnly === false ? "API" : "—";
-  // ChatGPT
+  // ChatGPT plan usage (through Codex), or sign-in state when there's none yet
   const sg = $("sbGpt");
   sg.textContent = "";
-  const gv = el("span", "v", info?.codex?.ok ? "ready" : "sign in");
-  const dotWrap = el("span");
-  dotWrap.append(el("span", `dot ${info?.codex?.ok ? "ok" : "warn"}`));
-  sg.append(el("span", "k", "ChatGPT"), dotWrap, gv);
-  sg.title = info?.codex?.detail ?? "";
+  const gw = usageState?.gptUsage?.windows?.[0];
+  if (gw && gw.utilization != null) {
+    const pct = Math.round(gw.utilization * 100);
+    const gline = el("span", "meter-line");
+    const gfill = el("i");
+    gfill.style.width = `${Math.min(100, pct)}%`;
+    gline.appendChild(gfill);
+    const gv = el("span", "v");
+    sg.append(el("span", "k", "ChatGPT"), gline, gv);
+    tickTo(gv, "gpt", pct, (n) => `${n}%`);
+    sg.className = `inst${usageState.gptUsage.status === "rejected" ? " bad" : pct >= 80 ? " warn" : ""}`;
+    sg.title = `${gw.label}: ${pct}%${gw.resetsAt ? `, resets ${fmtTime(gw.resetsAt)}` : ""}. Click for details.`;
+  } else {
+    const gv = el("span", "v", info?.codex?.ok ? "ready" : "sign in");
+    const dotWrap = el("span");
+    dotWrap.append(el("span", `dot ${info?.codex?.ok ? "ok" : "warn"}`));
+    sg.className = "inst";
+    sg.append(el("span", "k", "ChatGPT"), dotWrap, gv);
+    sg.title = info?.codex?.ok ? "Signed in. Usage shows once Codex reports it." : (info?.codex?.detail ?? "");
+  }
 }
 function buildModelSelect() {
   const sel = $("modelSelect");
@@ -1259,20 +1274,24 @@ async function showUsage() {
   const box = el("div");
   box.appendChild(el("h4", "", "Claude plan"));
   if (!u.usage?.windows?.length) box.appendChild(el("p", "muted", "No usage from your Claude plan yet. It shows once Claude reports it (at start, or after your first message)."));
-  for (const w of u.usage?.windows ?? []) {
-    const pct = w.utilization == null ? null : Math.round(w.utilization * 100);
-    const m = el("div", `meter${pct >= 100 || w.status === "rejected" ? " full" : pct >= 80 ? " warn" : ""}`);
-    m.append(el("span", "", w.label), el("span", "", pct == null ? "?" : `${pct}%`));
-    const bar = el("div", "bar");
-    const fill = el("i");
-    fill.style.width = `${Math.min(100, pct ?? 0)}%`;
-    bar.appendChild(fill);
-    m.appendChild(bar);
-    if (w.resetsAt) m.appendChild(el("span", "when", `Resets ${fmtTime(w.resetsAt)}`));
-    box.appendChild(m);
-  }
-  box.appendChild(el("h4", "", "ChatGPT plan"));
-  box.appendChild(el("p", "muted", u.codex.ok ? `Signed in · ${info.models.gpt.map(shortModel).join(", ")}` : u.codex.detail));
+  const meters = (windows) => {
+    for (const w of windows ?? []) {
+      const pct = w.utilization == null ? null : Math.round(w.utilization * 100);
+      const m = el("div", `meter${pct >= 100 || w.status === "rejected" ? " full" : pct >= 80 ? " warn" : ""}`);
+      m.append(el("span", "", w.label), el("span", "", pct == null ? "?" : `${pct}%`));
+      const bar = el("div", "bar");
+      const fill = el("i");
+      fill.style.width = `${Math.min(100, pct ?? 0)}%`;
+      bar.appendChild(fill);
+      m.appendChild(bar);
+      if (w.resetsAt) m.appendChild(el("span", "when", `Resets ${fmtTime(w.resetsAt)}`));
+      box.appendChild(m);
+    }
+  };
+  meters(u.usage?.windows);
+  box.appendChild(el("h4", "", `ChatGPT plan${u.gptUsage?.plan ? ` · ${u.gptUsage.plan}` : ""}`));
+  if (u.gptUsage?.windows?.length) meters(u.gptUsage.windows);
+  else box.appendChild(el("p", "muted", u.codex.ok ? `Signed in · ${info.models.gpt.map(shortModel).join(", ")}. Codex hasn't reported usage yet.` : u.codex.detail));
   const c = el("div", `callout${u.limited ? " bad" : ""}`);
   c.textContent = u.limited
     ? `Claude is at its limit until ${fmtTime(u.usage?.resetsAt)}. Tasks continue on ${shortModel(u.gpt)}.`

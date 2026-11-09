@@ -123,10 +123,7 @@ async function ensureAuth() {
   host.plan = auth.plan;
   host.commands = h.commands;
   availableModels = h.availableModels;
-  if (h.usage && (!host.usage || h.usage.at >= host.usage.at)) {
-    host.usage = h.usage;
-    host.usageReadAt = Date.now();
-  }
+  if (h.usage && (!host.usage || h.usage.at >= host.usage.at)) host.usage = h.usage;
   return auth;
 }
 
@@ -259,7 +256,7 @@ ipcMain.handle("open-subagents-file", () => shell.openPath(cfg.subagents_file));
 ipcMain.handle("usage", async (_e, force?: boolean) => {
   const every = (cfg.limits.refresh_minutes ?? 0) * 60_000;
   if (force || !host.usageReadAt || (every && Date.now() - host.usageReadAt > every)) await host.refreshUsage();
-  return { usage: host.usage, limited: host.claudeLimited, gpt: cfg.models.gpt[0], codex: codexStatus(cfg.root) };
+  return { usage: host.usage, gptUsage: host.gptUsage, limited: host.claudeLimited, gpt: cfg.models.gpt[0], codex: codexStatus(cfg.root) };
 });
 // Models: choose the model for each role and what the pickers offer; saved to harness.config.yaml.
 ipcMain.handle("models", () => ({ models: cfg.models, available: availableModels, roles: MODEL_ROLES }));

@@ -5,6 +5,7 @@ import { ChatEngine, expandShortcut, mentionNote, parseMentions, type ChatEvent,
 import { GptChat, listGptChats, isGptChat } from "./gpt-chat.js";
 import type { Ask } from "./guards.js";
 import { isExhausted, loadUsage, formatReset, type UsageSnapshot } from "./usage.js";
+import { readCodexUsage } from "./codex-usage.js";
 
 export interface TabInfo {
   id: string;
@@ -61,10 +62,17 @@ export class Host {
   /** When plan usage was last read on demand (ms). */
   usageReadAt = 0;
 
-  /** Re-read Claude plan usage now (not only when a message runs). */
+  /** Latest ChatGPT plan usage, read through Codex. */
+  gptUsage: (UsageSnapshot & { plan?: string }) | null = null;
+
+  /** Re-read Claude and ChatGPT plan usage now (not only when a message runs). */
   async refreshUsage(): Promise<UsageSnapshot | null> {
     const h = this.tabs.values().next().value?.harness ?? new Harness(this.cfg, this.askFor(0));
-    const snap = await h.refreshUsage().catch(() => null);
+    const [snap, gpt] = await Promise.all([
+      h.refreshUsage().catch(() => null),
+      readCodexUsage(this.cfg.root, { warnAt: this.cfg.limits.warn_at }).catch(() => null),
+    ]);
+    if (gpt) this.gptUsage = gpt;
     this.usageReadAt = Date.now();
     if (snap && (!this.usage || snap.at >= this.usage.at)) this.usage = snap;
     return this.usage;
