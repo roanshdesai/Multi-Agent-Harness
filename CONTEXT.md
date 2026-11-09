@@ -159,7 +159,7 @@ Fixed in the last review:
 
 Items 1–6 of the Mac check were worked through on 2026-11-09 (see "Verified on the owner's Mac"). What's left:
 
-1. **Packaging:** `npm run desktop:mac` builds on the Mac (2026-11-09: ~409 MB arm64 .dmg, signed with the owner's Apple Development certificate, `codesign --verify --deep --strict` passes, the .dmg mounts). Signing takes ~15 minutes (it timestamps every file). Notarization is skipped (no notarize settings), so other Macs will warn on first open. Still to check: launching the new build. Quit the running copy first, since the single-instance lock makes a second launch just focus the old one.
+1. **Packaging:** `npm run desktop:mac` builds on the Mac (2026-11-09: ~409 MB arm64 .dmg, signed with the owner's Apple Development certificate, `codesign --verify --deep --strict` passes, the .dmg mounts). Signing takes ~15 minutes (it timestamps every file). Notarization is skipped (no notarize settings), so other Macs will warn on first open. The built app launches, stays up and opens its bridge socket. Quit any running copy before launching a new build, since the single-instance lock makes a second launch just focus the old one.
 2. **Pally + /remote:** decide on bearer auth / a stable tunnel (see "Not verified yet"), then add the link in Pally.
 3. **Computer use:** approve any other apps you want GPT to use in the ChatGPT app (Finder isn't approved yet).
 4. Optional clean-up outside this repo: `palmier-pro` in `~/.codex/config.toml` fails on every Codex run (turn it off if PalmierPro isn't used), and the `cardboard` skill's SKILL.md has invalid YAML for Codex.
