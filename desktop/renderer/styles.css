@@ -70,12 +70,13 @@ a { color: inherit; text-decoration-color: var(--ink-3); text-underline-offset: 
 .new-task kbd { color: var(--ink-3); }
 .new-task:active, .send:active, .text-btn:active { transform: translateY(1px); }
 
-.library { display: flex; gap: 2px; padding: 4px 10px 0; border-bottom: 1px solid var(--rule); }
-.seg { position: relative; border: 0; background: none; color: var(--ink-3); padding: 7px 6px 8px; }
+.library { display: flex; gap: 2px; padding: 4px 10px 0; border-bottom: 1px solid var(--rule); overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; flex: none; }
+.library::-webkit-scrollbar { display: none; }
+.seg { position: relative; flex: none; white-space: nowrap; border: 0; background: none; color: var(--ink-3); padding: 7px 6px 8px; }
 .seg:hover { color: var(--ink); }
 .seg.active { color: var(--ink); }
-.seg.active::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: -1px; height: 1px; background: var(--signal); }
-.seg-badge { display: inline-block; margin-left: 4px; min-width: 14px; padding: 0 3px; border-radius: 3px; background: var(--amber); color: var(--paper); font-size: 9.5px; line-height: 14px; text-align: center; letter-spacing: 0; }
+.seg.active::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 1px; background: var(--signal); }
+.seg-badge { display: inline-block; vertical-align: 1px; margin-left: 4px; min-width: 14px; padding: 0 3px; border-radius: 3px; background: var(--amber); color: var(--paper); font-size: 9.5px; line-height: 14px; text-align: center; letter-spacing: 0; }
 .pane-tools { display: flex; gap: 6px; align-items: center; padding: 10px 12px 6px; }
 .pane-tools input, .input { flex: 1; min-width: 0; border: 1px solid var(--rule); background: var(--card); color: var(--ink); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 12.5px; outline: none; }
 .pane-tools input:focus, .input:focus { border-color: var(--ink-3); }

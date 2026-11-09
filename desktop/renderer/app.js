@@ -1198,6 +1198,7 @@ const PANES = { projects: "Projects", chats: "Chats", docs: "Documents", memory:
 function setPane(p) {
   pane = p;
   document.querySelectorAll(".seg[data-pane]").forEach((b) => b.classList.toggle("active", b.dataset.pane === p));
+  document.querySelector(`.seg[data-pane="${p}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
   $("paneSearch").value = "";
   $("paneSearch").placeholder = p === "docs" ? "Search documents" : p === "chats" ? "Search chats (⌘K)" : p === "projects" ? "Find a project" : "Filter";
   renderPane();
@@ -1207,6 +1208,13 @@ function setPane(p) {
   if (p === "projects") refreshProjects();
 }
 document.querySelectorAll(".seg[data-pane]").forEach((b) => (b.onclick = () => setPane(b.dataset.pane)));
+// The tab row scrolls sideways when it doesn't fit; a mouse wheel scrolls it too (trackpads already do).
+document.querySelector(".library").addEventListener("wheel", (e) => {
+  const nav = e.currentTarget;
+  if (nav.scrollWidth <= nav.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+  nav.scrollLeft += e.deltaY;
+  e.preventDefault();
+}, { passive: false });
 $("newTaskBtn").onclick = () => newTab();
 $("paneSearch").oninput = () => renderPane();
 $("statusAct").onclick = () => showStatus();
