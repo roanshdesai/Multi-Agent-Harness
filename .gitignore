@@ -8,3 +8,4 @@ release/
 out/
 mcp-servers.json
 *.local.yaml
+e2e.png
