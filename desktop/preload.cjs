@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("harness", {
   setModel: (m) => ipcRenderer.invoke("set-model", m),
   design: (q) => ipcRenderer.invoke("design", q),
   agents: () => ipcRenderer.invoke("agents"),
+  runEval: (filter) => ipcRenderer.invoke("eval", filter),
   pickWorkspace: () => ipcRenderer.invoke("pick-workspace"),
   openConfig: () => ipcRenderer.invoke("open-config"),
   openDesignLibrary: () => ipcRenderer.invoke("open-design-library"),

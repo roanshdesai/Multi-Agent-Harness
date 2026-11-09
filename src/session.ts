@@ -15,6 +15,7 @@ import { designLibraryTool } from "./tools/design-library.js";
 import { guiTestTool } from "./tools/gui-test.js";
 import { pushApprovalHook, stuckDetector, type Ask } from "./guards.js";
 import { assertClaudeSubscription, subscriptionEnv } from "./subscription.js";
+import { HARNESS_COMMANDS, mergeCommands, type CommandInfo } from "./commands.js";
 
 const ORCHESTRATOR_PROMPT = `
 # Harness routing rules
@@ -139,14 +140,25 @@ export class Harness {
     } as Options;
   }
 
-  /** Confirm the Claude login is a subscription without sending any prompt. */
+  /** Every command available: the harness's own plus plugin/skill commands the session reports. */
+  commands: CommandInfo[] = HARNESS_COMMANDS;
+
+  /**
+   * Start a session without sending a prompt to (1) confirm the Claude login is a
+   * subscription and (2) collect the slash commands plugins and skills provide.
+   */
   async checkAuth(): Promise<string | undefined> {
-    if (!this.cfg.auth.subscription_only) return undefined;
     const idle = (async function* () {
       await new Promise(() => {});
     })() as AsyncIterable<never>;
     const q = query({ prompt: idle, options: this.options({ persistSession: false }) });
     try {
+      try {
+        this.commands = mergeCommands(await q.supportedCommands());
+      } catch {
+        /* keep the built-in list */
+      }
+      if (!this.cfg.auth.subscription_only) return undefined;
       this.plan = assertClaudeSubscription(await q.accountInfo());
       return this.plan;
     } finally {

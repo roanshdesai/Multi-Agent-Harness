@@ -19,9 +19,9 @@ interface EvalTask {
  * Re-runnable eval suite (item 6). Each task runs headless on a fresh,
  * unsaved session; checks are routing, string/regex, and an LLM judge.
  */
-export async function runEvals(harness: Harness, filter = "") {
+export async function runEvals(harness: Harness, filter = "", log: (line: string) => void = console.log) {
   const dir = join(harness.cfg.root, "evals", "tasks");
-  if (!existsSync(dir)) return console.log("No evals/tasks directory.");
+  if (!existsSync(dir)) return log("No evals/tasks directory.");
   const tasks: EvalTask[] = readdirSync(dir)
     .filter((f) => /\.ya?ml$/.test(f))
     .map((f) => YAML.parse(readFileSync(join(dir, f), "utf8")))
@@ -29,7 +29,6 @@ export async function runEvals(harness: Harness, filter = "") {
 
   const results = [];
   for (const t of tasks) {
-    process.stdout.write(`▶ ${t.name} … `);
     const started = Date.now();
     const r = await harness.run(t.prompt, { persistSession: false, maxTurns: t.max_turns ?? 40 });
     const failures: string[] = [];
@@ -46,7 +45,7 @@ export async function runEvals(harness: Harness, filter = "") {
       if (!/GRADE:\s*PASS/i.test(j.text)) failures.push(`judge: ${j.text.split("\n").slice(0, 2).join(" ")}`);
     }
     const passed = failures.length === 0;
-    console.log(passed ? "\x1b[32mPASS\x1b[0m" : `\x1b[31mFAIL\x1b[0m\n   ${failures.join("\n   ")}`);
+    log(`${passed ? "PASS" : "FAIL"}  ${t.name}${passed ? "" : `\n   ${failures.join("\n   ")}`}`);
     results.push({ ...t, passed, failures, agentsUsed: r.agentsUsed, costUsd: r.costUsd, ms: Date.now() - started });
   }
 
@@ -55,5 +54,5 @@ export async function runEvals(harness: Harness, filter = "") {
   const file = join(outDir, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
   writeFileSync(file, JSON.stringify({ models: harness.cfg.models, results }, null, 2));
   const passed = results.filter((r) => r.passed).length;
-  console.log(`\n${passed}/${results.length} passed · saved ${file}`);
+  log(`${passed}/${results.length} passed · saved ${file}`);
 }

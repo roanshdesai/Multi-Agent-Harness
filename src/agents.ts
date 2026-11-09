@@ -5,6 +5,11 @@ import type { HarnessConfig } from "./config.js";
  * Subagents the main Opus orchestrator can delegate to via the Agent tool.
  * Each one runs on its own model.
  */
+/** Agents whose real work runs on a model other than their own (shown in /agents and the app). */
+export function agentRunsOn(cfg: HarnessConfig): Record<string, string> {
+  return { "gui-tester": `${cfg.models.gui} (via Codex, ChatGPT plan)` };
+}
+
 export function buildAgents(cfg: HarnessConfig): Record<string, AgentDefinition> {
   const m = cfg.models;
   return {
@@ -55,7 +60,7 @@ Save large raw dumps to files under .harness/scratch/ and return the path rather
 
     "gui-tester": {
       description:
-        "Tests web UIs in a real browser. Uses the gui_test tool (GPT-6 Astra); falls back to Playwright MCP if that fails.",
+        "Tests web UIs in a real browser. The testing itself runs on GPT-6 Astra through Codex (gui_test tool); this Sonnet agent briefs it and falls back to Playwright MCP if Codex fails.",
       model: m.worker,
       effort: cfg.effort.worker,
       prompt: `You test user interfaces.

@@ -6,9 +6,11 @@ import { homedir } from "node:os";
 import { loadConfig, type HarnessConfig } from "../config.js";
 import { Harness } from "../session.js";
 import { ChatEngine, expandShortcut, type ChatEvent } from "../engine.js";
-import { buildAgents } from "../agents.js";
+import { buildAgents, agentRunsOn } from "../agents.js";
+import { runEvals } from "../eval.js";
 import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "../tools/design-library.js";
 import { codexStatus } from "../subscription.js";
+import type { CommandInfo } from "../commands.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(here, "..", ".."); // repo root (dev) or app.asar (packaged)
@@ -75,7 +77,7 @@ const savePrefs = () => writeFileSync(prefsFile, JSON.stringify(prefs, null, 2))
 if (existsSync(prefs.workspace)) process.chdir(prefs.workspace);
 
 // One subscription check per app launch.
-let auth: { plan?: string; error?: string } | null = null;
+let auth: { plan?: string; error?: string; commands?: CommandInfo[] } | null = null;
 
 interface WinState {
   win: BrowserWindow;
@@ -147,12 +149,13 @@ ipcMain.handle("init", async (e) => {
   const { harness, chat } = state(e.sender);
   if (!auth) {
     try {
-      auth = { plan: await harness.checkAuth() };
+      auth = { plan: await harness.checkAuth(), commands: harness.commands };
     } catch (err) {
-      auth = { error: (err as Error).message };
+      auth = { error: (err as Error).message, commands: harness.commands };
     }
   }
   if (auth.plan) harness.plan = auth.plan;
+  if (auth.commands) harness.commands = auth.commands;
   const codex = codexStatus(cfg.root);
   return {
     auth,
@@ -167,6 +170,8 @@ ipcMain.handle("init", async (e) => {
     mcpSkipped: harness.mcpSkipped,
     plugins: harness.plugins.map((p) => p.path.split(/[\\/]/).pop()),
     designCount: loadDesignLinks(cfg.design_library).length,
+    commands: harness.commands,
+    runsOn: agentRunsOn(cfg),
     platform: process.platform,
   };
 });
@@ -224,8 +229,21 @@ ipcMain.handle("design", (_e, q: string) => {
 });
 
 ipcMain.handle("agents", () =>
-  Object.entries(buildAgents(cfg)).map(([name, a]) => ({ name, model: a.model, description: a.description })),
+  Object.entries(buildAgents(cfg)).map(([name, a]) => ({
+    name,
+    model: a.model,
+    runsOn: agentRunsOn(cfg)[name] ?? null,
+    description: a.description,
+  })),
 );
+
+// /eval: runs the suite and streams each result into the chat as a note.
+ipcMain.handle("eval", async (e, filter: string) => {
+  const { harness, win } = state(e.sender);
+  const note = (text: string) => !win.isDestroyed() && win.webContents.send("chat-event", { type: "note", text });
+  note(`Running evals${filter ? ` matching "${filter}"` : ""}…`);
+  await runEvals(harness, filter, note);
+});
 
 ipcMain.handle("pick-workspace", async (e) => {
   const { win } = state(e.sender);

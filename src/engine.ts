@@ -22,7 +22,8 @@ export type ChatEvent =
   | { type: "tool"; id: string; name: string; summary: string; sub: boolean }
   | { type: "verify"; status: "running" | "pass" | "fail"; round: number; feedback?: string }
   | { type: "turn-end"; numTurns: number; agents: string[]; costUsd: number; isError: boolean; error?: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "note"; text: string };
 
 export interface HistoryItem {
   role: "user" | "assistant" | "agent" | "tool";

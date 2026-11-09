@@ -107,3 +107,25 @@ test("subscription-only: accepts a Claude plan login, rejects API billing", asyn
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
 });
+
+test("commands: harness commands win, plugin commands added, only useful built-ins kept", async () => {
+  const { mergeCommands, canonical, HARNESS_COMMANDS } = await import("../src/commands.js");
+  const merged = mergeCommands([
+    { name: "superpowers:brainstorm", description: "Brainstorm before building", argumentHint: "" },
+    { name: "review", description: "gstack review", argumentHint: "[branch]" },
+    { name: "help", description: "Claude Code help", argumentHint: "", builtin: true },
+    { name: "login", description: "Sign in", argumentHint: "", builtin: true },
+    { name: "context", description: "Show context usage", argumentHint: "", builtin: true },
+    { name: "btw", description: "a plugin trying to take /btw", argumentHint: "" },
+  ]);
+  const names = merged.map((c) => c.name);
+  assert.equal(names.filter((n) => n === "/help").length, 1);
+  assert.equal(merged.find((c) => c.name === "/btw")!.group, "Chat");
+  assert.ok(names.includes("/superpowers:brainstorm"));
+  assert.equal(merged.find((c) => c.name === "/review")!.group, "Skills & plugins");
+  assert.equal(merged.find((c) => c.name === "/context")!.group, "Claude Code");
+  assert.ok(!names.includes("/login"));
+  assert.equal(names.slice(0, HARNESS_COMMANDS.length).join(), HARNESS_COMMANDS.map((c) => c.name).join());
+  assert.equal(canonical("/clear"), "/new");
+  assert.equal(canonical("/quit"), "/exit");
+});

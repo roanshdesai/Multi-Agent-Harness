@@ -7,25 +7,9 @@ const thread = $("thread");
 const input = $("input");
 
 const AGENT_COLORS = ["advisor", "coder", "researcher", "summarizer", "gui-tester", "video", "designer", "verifier"];
-const COMMANDS = [
-  ["/new", "Start a new chat"],
-  ["/fork", "Copy this chat into a new window"],
-  ["/btw", "Side question that doesn't touch the chat"],
-  ["/stop", "Stop the running turn"],
-  ["/advisor", "Ask the Fable advisor"],
-  ["/code", "Hand a coding task to the Fable coder"],
-  ["/research", "Send Sonnet researchers"],
-  ["/test", "GUI test a URL (GPT-6 Astra)"],
-  ["/video", "Video task for Opus"],
-  ["/design", "Search your UI links"],
-  ["/remember", "Save something to long-term memory"],
-  ["/recall", "Search long-term memory"],
-  ["/rename", "Rename this chat"],
-  ["/verify", "Turn the verifier on or off"],
-  ["/model", "Change the main model"],
-  ["/agents", "Show the team"],
-  ["/status", "Plans, integrations and settings"],
-  ["/help", "All commands"],
+let COMMANDS = [
+  { name: "/new", description: "Start a new chat", group: "Chat" },
+  { name: "/help", description: "All commands", group: "Harness" },
 ];
 const SUGGESTIONS = [
   ["Research", "Compare the top 3 React animation libraries in my design library", "/research "],
@@ -73,10 +57,11 @@ function agentColor(name) {
 function modelFor(agent) {
   if (!info) return "";
   const m = info.models;
-  const map = { advisor: m.advisor, coder: m.coder, designer: m.coder, researcher: m.worker, summarizer: m.triage, "gui-tester": m.worker, video: m.video, verifier: m.verifier };
-  return (map[agent] || "").replace(/^claude-/, "").replace(/-(\d)-(\d)$/, " $1.$2");
+  const map = { advisor: m.advisor, coder: m.coder, designer: m.coder, researcher: m.worker, summarizer: m.triage, "gui-tester": m.gui, video: m.video, verifier: m.verifier };
+  return shortModel(map[agent] || "");
 }
 function shortModel(id) {
+  if (/^gpt-/i.test(id)) return id.replace(/^gpt-(\d+)-?/i, "GPT-$1 ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
   return id.replace(/^claude-/, "").replace(/-(\d)-(\d)$/, " $1.$2").replace(/^./, (c) => c.toUpperCase());
 }
 
@@ -245,6 +230,9 @@ api.onEvent((e) => {
       endLive();
       addNote(e.message, "error");
       break;
+    case "note":
+      addNote(e.text, /^FAIL/.test(e.text) ? "error" : "");
+      break;
   }
 });
 
@@ -374,7 +362,7 @@ async function showAgents() {
     const r = el("div", "agent-row");
     const chip = el("span", "agent-chip");
     chip.style.setProperty("--c", agentColor(a.name));
-    chip.append(el("span", "", a.name), el("span", "model", shortModel(a.model || "")));
+    chip.append(el("span", "", a.name), el("span", "model", a.runsOn ? shortModel(a.runsOn.split(" ")[0]) : shortModel(a.model || "")));
     r.append(chip, el("p", "", a.description));
     box.appendChild(r);
   }
@@ -402,12 +390,17 @@ function showStatus() {
 }
 function showHelp() {
   const box = el("div");
-  for (const [c, d] of COMMANDS) {
+  let group = "";
+  for (const c of COMMANDS) {
+    if (c.group !== group) {
+      group = c.group;
+      box.appendChild(el("div", "chat-group", group));
+    }
     const r = el("div", "slash-item");
-    r.append(el("code", "", c), el("span", "", d));
+    r.append(el("code", "", c.name + (c.args ? ` ${c.args}` : "")), el("span", "", c.description));
     box.appendChild(r);
   }
-  box.appendChild(el("p", "", "Any other /command (for example superpowers or gstack skills like /review, /qa, /ship) goes to the agent."));
+  box.appendChild(el("p", "", "Any other /command goes straight to the agent."));
   modal("Commands", box);
 }
 
@@ -493,9 +486,13 @@ function autoSize() {
   $("sendBtn").disabled = !input.value.trim();
 }
 function slashMatches() {
-  const v = input.value;
+  const v = input.value.toLowerCase();
   if (!v.startsWith("/") || v.includes(" ") || v.includes("\n")) return [];
-  return COMMANDS.filter(([c]) => c.startsWith(v.toLowerCase()));
+  const q = v.slice(1);
+  return COMMANDS.filter((c) => {
+    const n = c.name.slice(1).toLowerCase();
+    return n.startsWith(q) || n.split(":").pop().startsWith(q);
+  }).slice(0, 60);
 }
 function renderSlash() {
   const items = slashMatches();
@@ -503,16 +500,23 @@ function renderSlash() {
   menu.hidden = !items.length;
   menu.textContent = "";
   slashIndex = Math.min(slashIndex, Math.max(items.length - 1, 0));
-  items.forEach(([c, d], i) => {
+  let group = "";
+  items.forEach((c, i) => {
+    if (c.group !== group) {
+      group = c.group;
+      menu.appendChild(el("div", "chat-group", group));
+    }
     const r = el("div", `slash-item${i === slashIndex ? " sel" : ""}`);
     r.setAttribute("role", "option");
-    r.append(el("code", "", c), el("span", "", d));
+    r.title = `${c.name}${c.args ? ` ${c.args}` : ""}\n${c.description}`;
+    r.append(el("code", "", c.name), el("span", "", (c.args ? `${c.args} · ` : "") + c.description));
     r.onmousedown = (e) => {
       e.preventDefault();
-      pickSlash(c);
+      pickSlash(c.name);
     };
     menu.appendChild(r);
   });
+  menu.querySelector(".sel")?.scrollIntoView({ block: "nearest" });
 }
 function pickSlash(c) {
   input.value = c + " ";
@@ -528,12 +532,24 @@ async function submit() {
   autoSize();
   $("slashMenu").hidden = true;
 
-  const [cmd, ...rest] = text.split(/\s+/);
+  const [rawCmd, ...rest] = text.split(/\s+/);
+  const cmd = { "/clear": "/new", "/quit": "/exit" }[rawCmd] || rawCmd;
   const arg = rest.join(" ");
   switch (cmd) {
     case "/new":
-    case "/clear":
       return newChat();
+    case "/exit":
+      return window.close();
+    case "/chats":
+      $("chatSearch").focus();
+      return refreshChats();
+    case "/resume": {
+      await refreshChats();
+      const target = /^\d+$/.test(arg) ? allChats[Number(arg) - 1] : allChats.find((c) => c.id === arg || c.id.startsWith(arg));
+      return target ? openChat(target.id) : addNote(arg ? "No such chat." : "Usage: /resume <id or number from /chats>");
+    }
+    case "/eval":
+      return api.runEval(arg);
     case "/fork":
       return fork(arg);
     case "/btw":
@@ -579,9 +595,9 @@ input.addEventListener("keydown", (e) => {
       slashIndex = (slashIndex + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
       return renderSlash();
     }
-    if (e.key === "Tab" || (e.key === "Enter" && items[slashIndex][0] !== input.value.trim())) {
+    if (e.key === "Tab" || (e.key === "Enter" && items[slashIndex].name !== input.value.trim())) {
       e.preventDefault();
-      return pickSlash(items[slashIndex][0]);
+      return pickSlash(items[slashIndex].name);
     }
     if (e.key === "Escape") return ($("slashMenu").hidden = true);
   }
@@ -643,6 +659,7 @@ function renderSuggestions() {
 
 async function start() {
   info = await api.init();
+  if (Array.isArray(info.commands) && info.commands.length) COMMANDS = info.commands;
   document.body.classList.add(`platform-${info.platform === "darwin" ? "mac" : info.platform === "win32" ? "win" : "linux"}`);
   if (info.auth.error) {
     $("blockerMsg").textContent = info.auth.error.split("\n")[0];

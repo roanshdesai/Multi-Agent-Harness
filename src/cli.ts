@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { Harness } from "./session.js";
 import { ChatEngine, expandShortcut, type ChatEvent } from "./engine.js";
-import { buildAgents } from "./agents.js";
+import { buildAgents, agentRunsOn } from "./agents.js";
+import { canonical } from "./commands.js";
 import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "./tools/design-library.js";
 import { openInNewTerminal, resumeCommand } from "./terminal.js";
 import { runEvals } from "./eval.js";
@@ -91,26 +92,23 @@ if (resumeFlag) chat.sessionId = resumeFlag;
 if (argv.includes("--continue")) chat.sessionId = chat.lastSession();
 
 // ── slash commands ──────────────────────────────────────────────────────────
-const HELP = `
-${c.bold("Chat")}
-  /new, /clear            start a fresh chat
-  /fork [title]           fork this chat into a NEW terminal window (add --here to switch in place)
-  /btw <question>         quick side question; doesn't touch the main chat (works mid-turn)
-  /chats                  list recent chats        /resume <id|#>   reopen one
-  /rename <title>         name this chat           /compact         compact context
-  /stop                   interrupt the running turn
-${c.bold("Delegation shortcuts")}
-  /advisor <q>            ask the Fable advisor     /code <task>     Fable coder
-  /research <q>           Sonnet researcher         /test <url> <checklist>   GUI test (GPT-6 Astra)
-  /video <task>           Opus video agent          /design [query]  search your UI links (add 'swift' for SwiftUI)
-  /remember <fact>        save to Hindsight         /recall <q>      search memory
-${c.bold("Harness")}
-  /status  /agents  /model [id]  /verify on|off  /eval [filter]  /help  /exit
-Any other /command (e.g. superpowers or gstack skills like /review, /qa, /ship) is passed to the agent.
-`;
+function printHelp() {
+  let group = "";
+  for (const cmd of harness.commands) {
+    if (cmd.group !== group) {
+      group = cmd.group;
+      console.log(`\n${c.bold(group)}`);
+    }
+    const left = `${cmd.name}${cmd.args ? ` ${cmd.args}` : ""}`;
+    const desc = cmd.description.length > 90 ? `${cmd.description.slice(0, 89)}…` : cmd.description;
+    console.log(`  ${left.padEnd(30)} ${c.dim(desc)}`);
+  }
+  console.log(c.dim("\nAny other /command is passed to the agent."));
+}
 
 async function command(line: string): Promise<boolean> {
-  const [cmd, ...rest] = line.trim().split(/\s+/);
+  const [rawCmd, ...rest] = line.trim().split(/\s+/);
+  const cmd = canonical(rawCmd);
   const arg = rest.join(" ");
 
   const shortcut = expandShortcut(cmd, arg);
@@ -121,13 +119,11 @@ async function command(line: string): Promise<boolean> {
 
   switch (cmd) {
     case "/help":
-      console.log(HELP);
+      printHelp();
       return true;
     case "/exit":
-    case "/quit":
       process.exit(0);
     case "/new":
-    case "/clear":
       chat.newChat();
       console.log(c.dim("Started a new chat."));
       return true;
@@ -218,7 +214,10 @@ async function command(line: string): Promise<boolean> {
       );
       return true;
     case "/agents":
-      for (const [name, a] of Object.entries(buildAgents(cfg))) console.log(`${c.cyan(name.padEnd(12))} ${c.dim(a.model ?? "")}  ${a.description}`);
+      for (const [name, a] of Object.entries(buildAgents(cfg))) {
+        const runsOn = agentRunsOn(cfg)[name];
+        console.log(`${c.cyan(name.padEnd(12))} ${c.dim(runsOn ? `${runsOn} · coordinated by ${a.model}` : (a.model ?? ""))}  ${a.description}`);
+      }
       return true;
     case "/design": {
       // "/design swift toast" includes Swift-only references; otherwise they're hidden
@@ -230,7 +229,7 @@ async function command(line: string): Promise<boolean> {
       return true;
     }
     case "/eval":
-      await runEvals(harness, arg);
+      await runEvals(harness, arg, (l) => console.log(/^PASS/.test(l) ? c.green(l) : /^FAIL/.test(l) ? c.red(l) : l));
       return true;
     default:
       return false; // unknown → pass through to the agent (plugin/skill commands)

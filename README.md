@@ -73,7 +73,7 @@ The terminal version (`npm start`) runs on the same engine and has the same comm
 | `/remember` `/recall` | Save to or search long-term memory |
 | `/status` `/agents` `/model` `/verify on\|off` `/eval` | Inspect and control the harness |
 
-Any other `/command`, such as Superpowers or gstack's `/review`, `/qa` and `/ship`, goes straight to the agent.
+Both apps share one command list (`src/commands.ts`). `/help` and the `/` menu also list every installed skill and plugin command, such as Superpowers, gstack and taste-skill, read live from the session. Typing part of a name finds plugin commands too: `/brain` finds `/superpowers:brainstorm`. Any other `/command` goes straight to the agent.
 
 Flags: `--resume <id>`, `--continue`, `-p "prompt"` (one turn, no chat window), `--model <id>`, `--no-verify`.
 
@@ -97,6 +97,7 @@ Results are saved to `evals/results/`. Re-run the evals after you change a model
 
 ```
 src/engine.ts           chat engine shared by both apps: turns, verifier loop, /btw, /fork
+src/commands.ts         one command list for both apps, merged with skill/plugin commands
 src/cli.ts              terminal app
 src/desktop/main.ts     desktop app (Electron main process)
 desktop/renderer/       desktop window UI
