@@ -9,11 +9,21 @@ A standalone terminal app built on the Claude Agent SDK. You chat with one orche
 | Coder, designer | Claude Fable 5.1 | All coding and UI work |
 | Researcher | Claude Sonnet 5.5 | Scraping, research and general tasks |
 | Summarizer | Claude Sonnet 5.5 | Shortens long pages and logs before the orchestrator reads them |
-| GUI tester | GPT-6 Astra via the `gui_test` tool | Browser testing. Falls back to Playwright MCP if `gui_test` fails. |
+| GUI tester | GPT-6 Astra via Codex CLI | Browser testing. Codex drives Playwright on your ChatGPT plan. Falls back to Claude + Playwright MCP if Codex fails or isn't signed in. |
 | Video | Claude Opus 5.5 | ffmpeg and Remotion |
 | Verifier | Claude Fable 5.1 | Checks every delegated result before you see it, on a throwaway copy of the chat |
 
 If Opus is overloaded or unavailable, the orchestrator falls back to `claude-opus-5-5`, then `claude-sonnet-5-5` (set in `models.fallback`).
+
+## Billing: subscriptions only
+
+There are no model API keys. Claude runs on your Claude plan, and GPT-6 Astra runs on your ChatGPT plan through the Codex CLI.
+
+- **Claude:** sign in once in Claude Code (`claude`, then `/login`, then pick your Pro/Max account). The harness uses the same login.
+- **GPT-6 Astra:** run `npx codex login` once and choose **Sign in with ChatGPT**.
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and the other API credentials are stripped before anything starts.
+- At startup the harness checks your Claude login. If it's an API key, a Console key, or a cloud provider, it refuses to run. `/status` shows both plans.
+- To run on API billing anyway (for example in CI), set `HARNESS_ALLOW_API=1`.
 
 **Memory:** Hindsight (MCP) and claude-mem (plugin). **Skills:** Superpowers (plugin) and gstack (`~/.claude/skills`). **Integrations:** GitHub, Slack, Outlook, Firecrawl, Exa, Context7 and Playwright. **Design:** the `design_library` tool searches your UI links file, `design-library/UI-LINKS.md`. Keep adding links under the right `##` heading. Sections marked *(only use if building with swift)* are hidden unless the work is SwiftUI/iOS. Your `taste-skill` skills are installed by `npm run setup`.
 
@@ -21,8 +31,8 @@ If Opus is overloaded or unavailable, the orchestrator falls back to `claude-opu
 
 ```bash
 npm install
-npm run setup             # installs superpowers, claude-mem, gstack, taste-skill and Chromium
-cp .env.example .env      # then fill in your keys
+npm run setup             # installs superpowers, claude-mem, gstack, taste-skill, Chromium; signs in to Codex
+cp .env.example .env      # integration tokens only (GitHub, Slack, ...), no model keys
 docker compose up -d hindsight
 npm start
 ```
@@ -69,7 +79,8 @@ src/session.ts          SDK options: models, agents, MCP, plugins, hooks, sandbo
 src/agents.ts           subagent definitions (model per role)
 src/guards.ts           push approval and stuck detection
 src/mcp.ts              external MCP servers
-src/tools/              design_library, gui_test (GPT-6 Astra)
+src/tools/              design_library, gui_test (GPT-6 Astra via Codex)
+src/subscription.ts     subscription-only checks, API-key stripping
 src/terminal.ts         opens /fork in a new terminal window
 src/eval.ts             eval runner
 harness.config.yaml     models, effort levels, approvals, sandbox, MCP switches

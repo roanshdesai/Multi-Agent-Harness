@@ -16,6 +16,7 @@ import { buildAgents } from "./agents.js";
 import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "./tools/design-library.js";
 import { openInNewTerminal, resumeCommand } from "./terminal.js";
 import { runEvals } from "./eval.js";
+import { codexStatus } from "./subscription.js";
 
 const c = {
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
@@ -111,7 +112,7 @@ async function runMain(prompt: string) {
       }
     }
     if (r.isError) console.log(c.red(`(turn ended with an error: ${r.text})`));
-    console.log(c.dim(`[${r.numTurns} turns · $${r.costUsd.toFixed(2)}${r.agentsUsed.length ? ` · agents: ${[...new Set(r.agentsUsed)].join(", ")}` : ""}]`));
+    console.log(c.dim(`[${r.numTurns} turns${cfg.auth.subscription_only ? "" : ` · ~$${r.costUsd.toFixed(2)} API`}${r.agentsUsed.length ? ` · agents: ${[...new Set(r.agentsUsed)].join(", ")}` : ""}]`));
   } catch (err) {
     console.log(c.red(`Error: ${(err as Error).message}`));
   } finally {
@@ -244,6 +245,7 @@ async function command(line: string): Promise<boolean> {
       console.log(
         [
           `chat:      ${sessionId ?? "(new)"}`,
+          `billing:   ${cfg.auth.subscription_only ? `subscription only · Claude plan: ${harness.plan ?? "?"} · Codex: ${codexStatus(cfg.root).detail}` : "API keys allowed (HARNESS_ALLOW_API=1)"}`,
           `models:    ${Object.entries(cfg.models).map(([k, v]) => `${k}=${v}`).join("  ")}`,
           `main now:  ${harness.mainModel}`,
           `verifier:  ${harness.verifyEnabled ? "on" : "off"}`,
@@ -330,6 +332,16 @@ async function main() {
     c.bold("Agent harness") +
       c.dim(`  main ${harness.mainModel} · advisor/coder ${cfg.models.advisor} · workers ${cfg.models.worker} · gui ${cfg.models.gui}`),
   );
+  try {
+    const plan = await harness.checkAuth();
+    if (plan) {
+      const codex = codexStatus(cfg.root);
+      console.log(c.dim(`Claude plan: ${plan} · GPT-6 Astra: ${codex.ok ? codex.detail : c.yellow(codex.detail)}`));
+    } else console.log(c.yellow("API billing allowed (HARNESS_ALLOW_API=1)."));
+  } catch (err) {
+    console.log(c.red((err as Error).message));
+    process.exit(1);
+  }
   if (sessionId) console.log(c.dim(`Resumed chat ${sessionId}`));
   if (harness.mcpSkipped.length) console.log(c.dim(`MCP not configured: ${harness.mcpSkipped.join("; ")}`));
   console.log(c.dim("Type /help for commands.\n"));

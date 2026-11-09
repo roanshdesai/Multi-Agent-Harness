@@ -1,5 +1,10 @@
 # Harness configuration. Environment variables in ${VAR} form are expanded.
 
+auth:
+  # Claude runs on your Claude plan login, GPT-6 Astra on your ChatGPT plan (via Codex).
+  # API keys are stripped and the harness refuses to start on API billing.
+  subscription_only: true
+
 models:
   main: claude-opus-5-5          # orchestrator
   advisor: claude-fable-5-1      # second opinion, used when stuck
@@ -8,7 +13,7 @@ models:
   triage: claude-sonnet-5-5      # summarize / compress scraped content (upgraded from Haiku)
   video: claude-opus-5-5
   verifier: claude-fable-5-1     # checks worker output before it is accepted
-  gui: gpt-6-astra               # OpenAI model that drives GUI tests
+  gui: gpt-6-astra               # runs through Codex CLI on your ChatGPT subscription
   # Fallback chain (item 10): tried in order if the primary is overloaded/unavailable
   fallback: [claude-opus-5-5, claude-sonnet-5-5]
 

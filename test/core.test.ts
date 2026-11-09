@@ -84,3 +84,26 @@ test("UI-LINKS.md: parses sections, notes, and hides Swift-only refs for web wor
   assert.deepEqual(searchDesignLinks(filterByPlatform(links, "swift"), "toasts").slice(0, 2).map((l) => l.title).sort(), ["exyte/PopupView", "omaralbeik/Drops"]);
   assert.ok(searchDesignLinks(web, "smooth scrolling").some((l) => l.title === "Lenis"));
 });
+
+test("subscription-only: accepts a Claude plan login, rejects API billing", async () => {
+  const { assertClaudeSubscription, subscriptionEnv } = await import("../src/subscription.js");
+  assert.equal(assertClaudeSubscription({ subscriptionType: "max", apiKeySource: "none", apiProvider: "firstParty" }), "max");
+  assert.equal(assertClaudeSubscription({ subscriptionType: "pro", apiKeySource: "none" }), "pro");
+  for (const bad of [
+    { subscriptionType: "Claude API", apiKeySource: "none", apiProvider: "firstParty" },
+    { subscriptionType: "max", apiKeySource: "ANTHROPIC_API_KEY" },
+    { subscriptionType: "max", apiKeySource: "/login managed key" },
+    { subscriptionType: "max", apiKeySource: "none", apiProvider: "bedrock" },
+    { apiKeySource: "none" },
+  ] as const) {
+    assert.throws(() => assertClaudeSubscription(bad as any), /not signed in with a subscription/, JSON.stringify(bad));
+  }
+  process.env.ANTHROPIC_API_KEY = "sk-test";
+  process.env.OPENAI_API_KEY = "sk-test";
+  const env = subscriptionEnv();
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
+  assert.equal(env.OPENAI_API_KEY, undefined);
+  assert.ok(env.PATH);
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+});

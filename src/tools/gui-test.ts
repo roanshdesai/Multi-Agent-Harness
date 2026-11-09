@@ -1,106 +1,110 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import OpenAI from "openai";
+import { codexBin, codexStatus, subscriptionEnv } from "../subscription.js";
 
-type Action =
-  | { action: "click"; x: number; y: number; why?: string }
-  | { action: "type"; text: string; why?: string }
-  | { action: "key"; key: string; why?: string }
-  | { action: "scroll"; dy: number; why?: string }
-  | { action: "goto"; url: string; why?: string }
-  | { action: "wait"; ms: number; why?: string }
-  | { action: "done"; report: string; passed: boolean };
-
-const SYSTEM = `You are a GUI test agent controlling a browser through screenshots.
-Viewport is 1280x800. On every step reply with ONE JSON object, one of:
-{"action":"click","x":int,"y":int,"why":str}
-{"action":"type","text":str,"why":str}
-{"action":"key","key":"Enter|Tab|Escape|...","why":str}
-{"action":"scroll","dy":int,"why":str}
-{"action":"goto","url":str,"why":str}
-{"action":"wait","ms":int,"why":str}
-{"action":"done","passed":bool,"report":"each checklist item as PASS/FAIL with evidence"}
-Be precise. Stop with "done" once every checklist item is decided.`;
+const RESULT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["passed", "checks", "console_errors"],
+  properties: {
+    passed: { type: "boolean" },
+    checks: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["item", "status", "evidence"],
+        properties: {
+          item: { type: "string" },
+          status: { type: "string", enum: ["PASS", "FAIL"] },
+          evidence: { type: "string" },
+        },
+      },
+    },
+    console_errors: { type: "array", items: { type: "string" } },
+  },
+};
 
 /**
- * GUI testing tool driven by an OpenAI vision model (GPT-6 Astra by default).
- * Errors are returned with isError so the gui-tester agent falls back to Playwright MCP.
+ * GUI testing on your ChatGPT subscription: runs `codex exec` with GPT-6 Astra,
+ * which drives a headless browser through the Playwright MCP server.
+ * Errors come back with isError so the gui-tester agent falls back to Claude + Playwright MCP.
  */
-export function guiTestTool(model: string, outRoot: string) {
+export function guiTestTool(model: string, root: string) {
   return tool(
     "gui_test",
-    "Run a GUI test in a real Chromium browser, driven by the GPT-6 Astra vision model. Give a URL and a checklist.",
+    "Run a GUI test in a real headless browser, driven by GPT-6 Astra (via your ChatGPT subscription). Give a URL and a checklist.",
     {
       url: z.string().url(),
       checklist: z.string().describe("What to verify, one item per line"),
-      max_steps: z.number().int().min(1).max(60).optional(),
+      timeout_minutes: z.number().int().min(1).max(60).optional(),
     },
-    async ({ url, checklist, max_steps }) => {
-      if (!process.env.OPENAI_API_KEY) {
-        return { isError: true, content: [{ type: "text", text: "OPENAI_API_KEY not set; use Playwright MCP fallback." }] };
+    async ({ url, checklist, timeout_minutes }) => {
+      const status = codexStatus(root);
+      if (!status.ok) {
+        return { isError: true, content: [{ type: "text", text: `gui_test unavailable: ${status.detail}. Use the Playwright MCP fallback.` }] };
       }
-      const { chromium } = await import("playwright");
-      const openai = new OpenAI();
-      const dir = join(outRoot, `gui-${Date.now()}`);
+      const dir = join(root, "out", `gui-${Date.now()}`);
       mkdirSync(dir, { recursive: true });
-      const browser = await chromium.launch();
-      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-      const consoleErrors: string[] = [];
-      page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
-      const log: string[] = [];
-      try {
-        await page.goto(url, { waitUntil: "domcontentloaded" });
-        const history: OpenAI.Chat.ChatCompletionMessageParam[] = [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: `URL: ${url}\nChecklist:\n${checklist}` },
-        ];
-        for (let step = 0; step < (max_steps ?? 30); step++) {
-          const shot = await page.screenshot();
-          const shotPath = join(dir, `step-${String(step).padStart(2, "0")}.png`);
-          writeFileSync(shotPath, shot);
-          history.push({
-            role: "user",
-            content: [
-              { type: "text", text: `Step ${step}. Current URL: ${page.url()}. Console errors so far: ${consoleErrors.length}` },
-              { type: "image_url", image_url: { url: `data:image/png;base64,${shot.toString("base64")}` } },
-            ],
-          });
-          const res = await openai.chat.completions.create({
-            model,
-            messages: history,
-            response_format: { type: "json_object" },
-          });
-          const text = res.choices[0]?.message?.content ?? "{}";
-          history.push({ role: "assistant", content: text });
-          // Keep only the last 4 screenshots in context
-          const imgIdx = history.map((m, i) => (Array.isArray(m.content) ? i : -1)).filter((i) => i >= 0);
-          for (const i of imgIdx.slice(0, -4)) history[i] = { role: "user", content: "(earlier screenshot removed)" };
+      const schemaFile = join(dir, "schema.json");
+      const resultFile = join(dir, "result.json");
+      writeFileSync(schemaFile, JSON.stringify(RESULT_SCHEMA));
 
-          const a = JSON.parse(text) as Action;
-          log.push(`${step}: ${text}`);
-          if (a.action === "done") {
-            return {
-              content: [{
-                type: "text",
-                text: `${a.passed ? "PASSED" : "FAILED"}\n${a.report}\n\nConsole errors:\n${consoleErrors.join("\n") || "(none)"}\nScreenshots: ${dir}`,
-              }],
-            };
-          }
-          if (a.action === "click") await page.mouse.click(a.x, a.y);
-          else if (a.action === "type") await page.keyboard.type(a.text);
-          else if (a.action === "key") await page.keyboard.press(a.key);
-          else if (a.action === "scroll") await page.mouse.wheel(0, a.dy);
-          else if (a.action === "goto") await page.goto(a.url);
-          else if (a.action === "wait") await page.waitForTimeout(Math.min(a.ms, 10_000));
-          await page.waitForLoadState("domcontentloaded").catch(() => {});
-        }
-        return { isError: true, content: [{ type: "text", text: `Ran out of steps.\n${log.join("\n")}\nScreenshots: ${dir}` }] };
-      } catch (err) {
-        return { isError: true, content: [{ type: "text", text: `gui_test failed: ${(err as Error).message}. Use the Playwright MCP fallback.` }] };
-      } finally {
-        await browser.close();
+      const prompt = `You are a meticulous GUI tester. Use the Playwright browser tools to open ${url} and verify each checklist item.
+Interact like a real user (click, type, scroll, resize to mobile 390x844 when layout matters). Take a screenshot as evidence for every item.
+Record browser console errors. Do not modify any files except screenshots.
+
+Checklist:
+${checklist}`;
+
+      const args = [
+        "exec",
+        "-m", model,
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "-s", "read-only",
+        "-C", dir,
+        "-c", 'approval_policy="never"',
+        "-c", 'mcp_servers.playwright.command="npx"',
+        "-c", `mcp_servers.playwright.args=["-y","@playwright/mcp@latest","--headless","--output-dir",${JSON.stringify(dir)}]`,
+        "--output-schema", schemaFile,
+        "-o", resultFile,
+        prompt,
+      ];
+
+      const log = await new Promise<{ code: number | null; out: string }>((resolve) => {
+        const child = spawn(codexBin(root), args, { env: subscriptionEnv(), stdio: ["ignore", "pipe", "pipe"] });
+        let out = "";
+        child.stdout.on("data", (d) => (out += d));
+        child.stderr.on("data", (d) => (out += d));
+        const timer = setTimeout(() => child.kill("SIGTERM"), (timeout_minutes ?? 15) * 60_000);
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          resolve({ code, out });
+        });
+      });
+      writeFileSync(join(dir, "codex.log"), log.out);
+
+      if (log.code !== 0 || !existsSync(resultFile)) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Codex GUI test failed (exit ${log.code}). Log: ${join(dir, "codex.log")}\n${log.out.slice(-1500)}\nUse the Playwright MCP fallback.` }],
+        };
+      }
+      try {
+        const r = JSON.parse(readFileSync(resultFile, "utf8"));
+        const lines = r.checks.map((c: any) => `${c.status}  ${c.item}\n      ${c.evidence}`);
+        return {
+          content: [{
+            type: "text",
+            text: `${r.passed ? "PASSED" : "FAILED"} (GPT-6 Astra via Codex)\n${lines.join("\n")}\n\nConsole errors:\n${r.console_errors.join("\n") || "(none)"}\nScreenshots and log: ${dir}`,
+          }],
+        };
+      } catch {
+        return { content: [{ type: "text", text: readFileSync(resultFile, "utf8") + `\nScreenshots: ${dir}` }] };
       }
     },
   );

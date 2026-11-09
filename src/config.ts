@@ -25,6 +25,7 @@ export interface HarnessConfig {
   plugins_dir: string;
   chats_dir: string;
   mcp: Record<string, boolean>;
+  auth: { subscription_only: boolean };
   root: string;
 }
 
@@ -49,6 +50,9 @@ export function loadConfig(root = process.env.HARNESS_ROOT ?? process.cwd()): Ha
   if (!existsSync(file)) throw new Error(`Config not found: ${file}`);
   const cfg = YAML.parse(expandEnv(readFileSync(file, "utf8"))) as HarnessConfig;
   cfg.root = root;
+  cfg.auth ??= { subscription_only: true };
+  // Escape hatch for CI/testing machines that only have API credentials.
+  if (process.env.HARNESS_ALLOW_API === "1") cfg.auth.subscription_only = false;
   cfg.design_library = resolve(root, cfg.design_library);
   cfg.plugins_dir = resolve(root, cfg.plugins_dir);
   cfg.chats_dir = resolve(root, cfg.chats_dir);

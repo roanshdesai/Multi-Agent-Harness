@@ -29,8 +29,16 @@ find "$ROOT/vendor/taste-skill" -name SKILL.md -not -path "*/node_modules/*" | w
   rm -rf "$HOME/.claude/skills/$n" && cp -R "$d" "$HOME/.claude/skills/$n" && echo "  installed skill: $n"
 done
 
-echo "→ Playwright browser for gui_test"
+echo "→ Browser for GUI tests (Playwright MCP)"
 npx --yes playwright install chromium
+
+echo "→ Subscription logins (no API keys are used)"
+if ! "$ROOT/node_modules/.bin/codex" login status 2>/dev/null | grep -qi chatgpt; then
+  echo "  Sign in to Codex with your ChatGPT account (used for GPT-6 Astra):"
+  "$ROOT/node_modules/.bin/codex" login || echo "  (skipped; run: npx codex login)"
+fi
+echo "  For Claude: open Claude Code (claude), run /login and pick your Claude account."
+echo "  (No Claude Code yet? Install it: curl -fsSL https://claude.ai/install.sh | bash)"
 
 [ -f "$ROOT/.env" ] || cp "$ROOT/.env.example" "$ROOT/.env"
 echo "Done. Fill in $ROOT/.env, then start Hindsight:  docker compose up -d hindsight"

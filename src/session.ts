@@ -14,6 +14,7 @@ import { buildExternalMcp } from "./mcp.js";
 import { designLibraryTool } from "./tools/design-library.js";
 import { guiTestTool } from "./tools/gui-test.js";
 import { pushApprovalHook, stuckDetector, type Ask } from "./guards.js";
+import { assertClaudeSubscription, subscriptionEnv } from "./subscription.js";
 
 const ORCHESTRATOR_PROMPT = `
 # Harness routing rules
@@ -77,6 +78,8 @@ export class Harness {
   readonly plugins: SdkPluginConfig[];
   modelOverride?: string;
   verifyEnabled: boolean;
+  /** Claude plan name once the subscription check has passed. */
+  plan?: string;
 
   constructor(
     readonly cfg: HarnessConfig,
@@ -98,11 +101,13 @@ export class Harness {
     const local = createSdkMcpServer({
       name: "harness",
       version: "1.0.0",
-      tools: [designLibraryTool(cfg.design_library), guiTestTool(cfg.models.gui, join(cfg.root, "out"))],
+      tools: [designLibraryTool(cfg.design_library), guiTestTool(cfg.models.gui, cfg.root)],
     });
     const stuck = stuckDetector(cfg);
     return {
       cwd: process.cwd(),
+      // Subscription-only: strip every API-key credential so billing can't fall back to the API.
+      ...(cfg.auth.subscription_only && { env: subscriptionEnv() }),
       model: this.mainModel,
       fallbackModel: cfg.models.fallback.join(","),
       effort: cfg.effort.main,
@@ -132,9 +137,32 @@ export class Harness {
     } as Options;
   }
 
+  /** Confirm the Claude login is a subscription without sending any prompt. */
+  async checkAuth(): Promise<string | undefined> {
+    if (!this.cfg.auth.subscription_only) return undefined;
+    const idle = (async function* () {
+      await new Promise(() => {});
+    })() as AsyncIterable<never>;
+    const q = query({ prompt: idle, options: this.options({ persistSession: false }) });
+    try {
+      this.plan = assertClaudeSubscription(await q.accountInfo());
+      return this.plan;
+    } finally {
+      q.close();
+    }
+  }
+
   /** Run one prompt to completion, streaming messages to the hooks. */
   async run(prompt: string, opts: Partial<Options>, hooks: TurnHooks = {}): Promise<TurnResult> {
     const q = query({ prompt, options: this.options(opts) });
+    if (this.cfg.auth.subscription_only && !this.plan) {
+      try {
+        this.plan = assertClaudeSubscription(await q.accountInfo());
+      } catch (err) {
+        q.close();
+        throw err;
+      }
+    }
     hooks.onQuery?.(q);
     const res: TurnResult = { sessionId: "", text: "", isError: false, numTurns: 0, costUsd: 0, agentsUsed: [] };
     for await (const m of q) {
