@@ -41,6 +41,17 @@ export function computerArgs(cfg: HarnessConfig): string[] {
   return out;
 }
 
+/**
+ * Codex's computer use talks to a local helper (OpenAI's computer-use plugin).
+ * When the log shows it couldn't reach that helper, say so plainly.
+ */
+export function helperDown(log: string): string | null {
+  const m = log.match(/(?:connect|connection)[^\n]{0,120}?(?:127\.0\.0\.1|localhost):(\d{2,5})|(?:127\.0\.0\.1|localhost):(\d{2,5})[^\n]{0,120}?(?:refused|failed|error|unreachable)/i);
+  if (!m || !/computer|screen|desktop|refused|connect/i.test(log)) return null;
+  const port = m[1] ?? m[2];
+  return `Codex's computer-use helper isn't running (nothing answered on 127.0.0.1:${port}), so GPT couldn't see or control the screen. The helper comes from OpenAI's computer-use plugin, not from this app. On the Mac: open the ChatGPT/Codex desktop app and turn on computer use there (it asks for Screen Recording and Accessibility), or check \`npx codex plugin list\` for computer-use; then run /computer test again.`;
+}
+
 /** Run one computer-use task with Codex. */
 export function runComputerUse(cfg: HarnessConfig, task: string, opts: { timeoutMinutes?: number } = {}): Promise<ComputerResult> {
   const dir = join(cfg.root, "out", `computer-${Date.now()}`);
@@ -81,7 +92,9 @@ export function runComputerUse(cfg: HarnessConfig, task: string, opts: { timeout
       } catch {
         /* no final message */
       }
-      if (code === 0 && text) resolve({ ok: true, text, dir });
+      const helper = helperDown(out);
+      if (helper) resolve({ ok: false, text: helper, dir });
+      else if (code === 0 && text) resolve({ ok: true, text, dir });
       else resolve({ ok: false, text: `Codex computer use failed (exit ${code}).\n${(text || out).slice(-1500)}`, dir });
     });
   });

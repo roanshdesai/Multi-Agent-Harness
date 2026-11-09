@@ -607,6 +607,9 @@ test("computer use: only allowed apps, run through Codex with the UI model", asy
     const r = await runComputerUse(cfg, COMPUTER_TEST_PROMPT, { timeoutMinutes: 1 });
     assert.ok(r.ok, r.text);
     assert.match(r.text, new RegExp(`echo\\(${cfg.models.gui}\\): This is a permissions check`));
+    const { helperDown } = await import("../src/tools/computer.js");
+    assert.match(helperDown("computer use: failed to connect to 127.0.0.1:19789: Connection refused")!, /helper isn't running \(nothing answered on 127\.0\.0\.1:19789\)/);
+    assert.equal(helperDown("all good"), null);
     const { engine } = { engine: await import("../src/engine.js") };
     assert.equal(engine.expandShortcut("/computer", "test"), null);
     assert.match(engine.expandShortcut("/computer", "open Safari")!, /computer_use tool/);

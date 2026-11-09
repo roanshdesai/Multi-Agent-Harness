@@ -103,6 +103,7 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 - The Mac `.dmg` and Windows installer. A Linux packaged build was tested.
 - Pally sign-in through the app's Sign in button (`claude /mcp`). The container can't reach agent.pally.com.
 - Listing cloud (claude.ai/code) sessions inside the app: the SDK has no API for it, so the Chats pane links out.
+- Computer use on the owner's Mac failed: Codex couldn't reach its computer-use helper at 127.0.0.1:19789 (OpenAI's computer-use plugin, `computer-use@openai-bundled`). The tool now reports this plainly. Next step: get the helper running (ChatGPT/Codex desktop app with computer use on, or `codex plugin`), then `/computer test`.
 - Computer use with real GPT-6 Astra on a Mac (needs Screen Recording + Accessibility for the app/terminal) and Codex browser use through OpenAI's extension. Tested only with the fake Codex.
 - Claude in Chrome with the real extension (the claude-in-chrome server connects; the browser side needs the extension signed in).
 - /remote from Pally: depends on Pally accepting a custom MCP server URL (pally.com wasn't reachable from the container) and on cloudflared being installed for the public link.
