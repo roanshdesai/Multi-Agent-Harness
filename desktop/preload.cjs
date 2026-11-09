@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("harness", {
   removeSubagent: (name) => invoke("subagents-remove", name),
   usage: (force) => invoke("usage", force),
   models: () => invoke("models"),
+  tokenStats: () => invoke("token-stats"),
   saveModels: (changes) => invoke("models-save", changes),
   connections: (reconnect) => invoke("connections", reconnect),
   mcpToggle: (name, enabled) => invoke("mcp-toggle", name, enabled),

@@ -448,6 +448,48 @@ test("ChatGPT usage: read from Codex's app server and shown like Claude's", asyn
   delete process.env.HARNESS_CODEX_BIN;
 });
 
+test("token stats: daily totals from Claude Code and Codex transcripts", async () => {
+  const { tokenStats } = await import("../src/token-stats.js");
+  const home = mkdtempSync(join(tmpdir(), "home-"));
+  const cdir = join(home, "claude", "projects", "-proj");
+  mkdirSync(join(cdir, "sess1", "subagents"), { recursive: true });
+  const day1 = "2026-03-02T10:00:00.000Z";
+  const msg = (id: string, ts: string, model: string, inp: number, cw: number, cr: number, out: number) =>
+    JSON.stringify({ type: "assistant", timestamp: ts, message: { id, model, usage: { input_tokens: inp, cache_creation_input_tokens: cw, cache_read_input_tokens: cr, output_tokens: out } } });
+  writeFileSync(join(cdir, "sess1.jsonl"), [
+    JSON.stringify({ type: "user", timestamp: day1 }),
+    msg("m1", day1, "claude-opus-5-5", 10, 100, 5000, 50), // split reply: same id twice, counted once
+    msg("m1", day1, "claude-opus-5-5", 10, 100, 5000, 50),
+    msg("m2", day1, "claude-sonnet-5-5", 5, 0, 0, 20),
+    msg("m3", day1, "<synthetic>", 999, 0, 0, 999),
+  ].join("\n"));
+  writeFileSync(join(cdir, "sess1", "subagents", "agent-1.jsonl"), msg("s1", day1, "claude-fable-5-1", 1, 0, 0, 9));
+  const gdir = join(home, "codex", "sessions", "2026", "03", "03");
+  mkdirSync(gdir, { recursive: true });
+  const ts2 = "2026-03-03T09:00:00.000Z";
+  writeFileSync(join(gdir, "rollout-1.jsonl"), [
+    JSON.stringify({ timestamp: ts2, type: "turn_context", payload: { model: "gpt-6-astra" } }),
+    JSON.stringify({ timestamp: ts2, type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 1000, cached_input_tokens: 600, output_tokens: 100 } } } }),
+    JSON.stringify({ timestamp: ts2, type: "event_msg", payload: { type: "token_count", info: null } }),
+  ].join("\n"));
+  process.env.CLAUDE_CONFIG_DIR = join(home, "claude");
+  process.env.CODEX_HOME = join(home, "codex");
+  const root = mkdtempSync(join(tmpdir(), "root-"));
+  try {
+    const s = await tokenStats(root);
+    const d1 = Object.keys(s.days).find((d) => s.days[d].claude)!;
+    assert.deepEqual(s.days[d1].claude, { "claude-opus-5-5": 160, "claude-sonnet-5-5": 25, "claude-fable-5-1": 10 });
+    const d2 = Object.keys(s.days).find((d) => s.days[d].gpt)!;
+    assert.deepEqual(s.days[d2].gpt, { "gpt-6-astra": 500 });
+    assert.deepEqual(s.sessions, { claude: 1, gpt: 1 }); // subagent file isn't a separate session
+    const again = await tokenStats(root); // second read comes from the cache
+    assert.deepEqual(again.days, s.days);
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.CODEX_HOME;
+  }
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

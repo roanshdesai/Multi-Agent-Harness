@@ -155,8 +155,158 @@ function welcome() {
     recent.append(b);
   }
   cols.append(start, recent);
-  w.append(roster, cols);
+  w.append(roster, cols, statsPanel());
   return w;
+}
+
+// ── token usage over time (like Claude Code's /stats), under the start screen ──
+let tokenData = null; // from api.tokenStats()
+let statsTab = "all"; // all | claude | gpt
+let statsLoading = null;
+function loadTokenStats(force) {
+  if (statsLoading && !force) return statsLoading;
+  statsLoading = api.tokenStats().then((d) => {
+    tokenData = d;
+    refreshWelcomes();
+    return d;
+  }).catch(() => null);
+  return statsLoading;
+}
+const fmtBig = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n)));
+const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// Reference texts for the comparison line, in tokens (about 1.33 tokens per word).
+const BOOKS = [
+  ["The Great Gatsby", 63e3],
+  ["Pride and Prejudice", 162e3],
+  ["Moby-Dick", 276e3],
+  ["The Lord of the Rings", 640e3],
+  ["War and Peace", 780e3],
+  ["the complete works of Shakespeare", 1.17e6],
+  ["the Harry Potter series", 1.44e6],
+  ["In Search of Lost Time", 1.7e6],
+  ["the Encyclopaedia Britannica", 59e6],
+  ["English Wikipedia", 6e9],
+];
+/** Per-day totals for the chosen tab, plus per-model totals. */
+function statsFor(tab) {
+  const perDay = new Map();
+  const perModel = new Map();
+  for (const [day, kinds] of Object.entries(tokenData?.days ?? {})) {
+    let t = 0;
+    for (const [kind, models] of Object.entries(kinds)) {
+      if (tab !== "all" && kind !== tab) continue;
+      for (const [m, n] of Object.entries(models)) {
+        t += n;
+        perModel.set(m, (perModel.get(m) ?? 0) + n);
+      }
+    }
+    if (t) perDay.set(day, t);
+  }
+  return { perDay, perModel };
+}
+function streaks(perDay) {
+  const days = [...perDay.keys()].sort();
+  let longest = 0, run = 0, prev = null;
+  for (const d of days) {
+    const t = new Date(`${d}T12:00:00`);
+    run = prev && (t - prev) / 864e5 < 1.5 ? run + 1 : 1;
+    longest = Math.max(longest, run);
+    prev = t;
+  }
+  let current = 0;
+  const c = new Date();
+  if (!perDay.has(dayKey(c))) c.setDate(c.getDate() - 1); // today not used yet: count from yesterday
+  while (perDay.has(dayKey(c))) {
+    current++;
+    c.setDate(c.getDate() - 1);
+  }
+  return { longest, current };
+}
+function statsPanel() {
+  const p = el("section", "stats");
+  const head = el("div", "stats-head");
+  head.appendChild(el("h3", "label-mono", "Token usage"));
+  const tabsEl = el("div", "stats-tabs");
+  for (const [k, label] of [["all", "All"], ["claude", "Claude"], ["gpt", "ChatGPT"]]) {
+    const b = el("button", `stats-tab${statsTab === k ? " on" : ""}`, label);
+    b.onclick = () => ((statsTab = k), refreshWelcomes());
+    tabsEl.appendChild(b);
+  }
+  head.appendChild(tabsEl);
+  p.appendChild(head);
+  if (!tokenData) {
+    p.appendChild(el("p", "muted", "Reading your Claude Code and Codex history…"));
+    void loadTokenStats();
+    return p;
+  }
+  const { perDay, perModel } = statsFor(statsTab);
+  const total = [...perDay.values()].reduce((a, b) => a + b, 0);
+  if (!total) {
+    p.appendChild(el("p", "muted", statsTab === "gpt" ? "No ChatGPT (Codex) usage found on this computer yet." : statsTab === "claude" ? "No Claude Code usage found on this computer yet." : "No usage found on this computer yet."));
+    return p;
+  }
+  const { longest, current } = streaks(perDay);
+  const top = [...perModel].sort((a, b) => b[1] - a[1])[0];
+  const peak = [...perDay].sort((a, b) => b[1] - a[1])[0];
+  const sessions = statsTab === "all" ? tokenData.sessions.claude + tokenData.sessions.gpt : tokenData.sessions[statsTab];
+  const tiles = el("div", "stats-tiles");
+  const tile = (k, v, sub) => {
+    const t = el("div", "tile");
+    t.append(el("span", "tk label-mono", k), el("span", "tv mono", v));
+    if (sub) t.appendChild(el("span", "ts", sub));
+    tiles.appendChild(t);
+  };
+  tile("Total tokens", fmtBig(total), "input + output");
+  tiles.lastChild.title = "Input, cache writes and output tokens. Cache reads (the same context re-read every turn) aren't counted.";
+  tile("Sessions", String(sessions));
+  tile("Active days", String(perDay.size));
+  tile("Current streak", `${current} day${current === 1 ? "" : "s"}`);
+  tile("Longest streak", `${longest} day${longest === 1 ? "" : "s"}`);
+  tile("Top model", shortModel(top[0]), fmtBig(top[1]));
+  tile("Busiest day", new Date(`${peak[0]}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }), fmtBig(peak[1]));
+  p.appendChild(tiles);
+
+  // calendar grid: one column per week (last 53), one row per weekday
+  const grid = el("div", `heat ${statsTab}`);
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 7 * 52 - start.getDay());
+  // Shade relative to the busiest day (square-root scale so quieter days still show).
+  const max = Math.max(...perDay.values());
+  const months = el("div", "heat-months");
+  let lastMonth = -1;
+  for (let d = new Date(start), col = 0; d <= end; col++) {
+    const week = el("div", "heat-col");
+    if (d.getMonth() !== lastMonth) {
+      const m = el("span", "", d.toLocaleDateString(undefined, { month: "short" }));
+      m.style.gridColumn = String(col + 1);
+      months.appendChild(m);
+      lastMonth = d.getMonth();
+    }
+    for (let r = 0; r < 7; r++, d.setDate(d.getDate() + 1)) {
+      const n = perDay.get(dayKey(d)) ?? 0;
+      const lvl = d > end ? -1 : !n ? 0 : Math.max(1, Math.ceil(4 * Math.sqrt(n / max)));
+      const cell = el("i", lvl < 0 ? "future" : `l${lvl}`);
+      if (lvl >= 0) cell.title = `${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}: ${n ? `${fmtBig(n)} tokens` : "no usage"}`;
+      week.appendChild(cell);
+    }
+    grid.appendChild(week);
+  }
+  const wrap = el("div", "heat-wrap");
+  wrap.append(months, grid);
+  const legend = el("div", "heat-legend");
+  legend.append(el("span", "", "Less"));
+  for (let i = 0; i <= 4; i++) legend.appendChild(el("i", `l${i}`));
+  legend.append(el("span", "", "More"));
+  p.append(wrap, legend);
+
+  // the comparison line
+  const book = [...BOOKS].reverse().find(([, n]) => total >= n);
+  const line = book
+    ? `You've used about ${Math.floor(total / book[1]).toLocaleString()}× more tokens than ${book[0]}.`
+    : `You've used about ${Math.round((total / BOOKS[0][1]) * 100)}% of the tokens in ${BOOKS[0][0]}.`;
+  p.appendChild(el("p", "stats-fact", line));
+  return p;
 }
 /** Redraw every empty tab's start screen (after the folder, chats or agents change). */
 function refreshWelcomes() {
@@ -1839,8 +1989,9 @@ async function start() {
   for (const t of info.tabs) ensureChatTab(t);
   activate(info.tabs[info.tabs.length - 1].id);
   await Promise.all([refreshDocs(), refreshMemory(), refreshUsage(), refreshAgents()]);
+  void loadTokenStats();
   // Re-read plan usage on the interval set in harness.config.yaml (limits.refresh_minutes).
-  if (info.usageRefreshMinutes > 0) setInterval(() => refreshUsage(), info.usageRefreshMinutes * 60_000);
+  if (info.usageRefreshMinutes > 0) setInterval(() => (refreshUsage(), loadTokenStats(true)), info.usageRefreshMinutes * 60_000);
   refreshWelcomes();
   renderPane();
   autoSize();
