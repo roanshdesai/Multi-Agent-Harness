@@ -40,20 +40,34 @@ export function toSnapshot(info: SDKRateLimitInfo): UsageSnapshot {
   } else if (info.rateLimitType) {
     windows.push({ key: info.rateLimitType, label: LABELS[info.rateLimitType] ?? info.rateLimitType, utilization: info.utilization ?? null, resetsAt: ms(info.resetsAt), status: info.status });
   }
+  // No top-level reset time: use the latest reset of a blocked window, so a block can expire.
+  const blocked = windows.filter((w) => w.status === "rejected" && w.resetsAt).map((w) => w.resetsAt!);
   return {
     at: Date.now(),
     status: info.status,
     windows,
-    resetsAt: ms(info.resetsAt),
+    resetsAt: ms(info.resetsAt) ?? (blocked.length ? Math.max(...blocked) : null),
     overage: info.overageStatus ?? null,
   };
 }
 
 /** True when Claude can't take more requests right now (and extra usage isn't available). */
+// Windows that only cover extra (paid) usage or one model: being out of these isn't being out of Claude.
+const PARTIAL = /overage|_opus$|_sonnet$/;
+
 export function isExhausted(s: UsageSnapshot | null | undefined): boolean {
-  if (!s) return false;
-  if (s.resetsAt && s.resetsAt < Date.now()) return false;
-  return s.status === "rejected" && s.overage !== "allowed" && s.overage !== "allowed_warning";
+  if (!s || s.status !== "rejected") return false;
+  if (s.overage === "allowed" || s.overage === "allowed_warning") return false;
+  // Without a reset time we can't tell when it ends, so don't trust an old "rejected" forever.
+  if (!s.resetsAt || s.resetsAt <= Date.now()) return false;
+  // The plan itself must be blocked, not just extra usage or a single model's window.
+  const blocked = s.windows.filter((w) => w.status === "rejected" || (w.utilization ?? 0) >= 1);
+  return blocked.length === 0 || blocked.some((w) => !PARTIAL.test(w.key));
+}
+
+/** Claude just answered, so it isn't out: clear a stale block. */
+export function markWorking(s: UsageSnapshot): UsageSnapshot {
+  return s.status === "rejected" ? { ...s, at: Date.now(), status: "allowed", resetsAt: null } : s;
 }
 
 const file = (cfg: HarnessConfig) => join(cfg.root, ".harness", "usage.json");

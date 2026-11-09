@@ -245,6 +245,12 @@ test("usage: reads the plan windows and knows when Claude is out", async () => {
   assert.equal(isExhausted({ ...out, overage: "allowed" }), false); // extra usage still available
   assert.equal(isExhausted({ ...out, resetsAt: Date.now() - 1000 }), false); // already reset
   assert.match(describeUsage(out).join("\n"), /New work goes to GPT/);
+  // Not out: no reset time (stale), extra usage only, or one model's weekly window.
+  assert.equal(isExhausted({ ...out, resetsAt: null }), false);
+  assert.equal(isExhausted(toSnapshot({ status: "rejected", resetsAt: soon, rateLimitType: "overage", overageStatus: "rejected" } as any)), false);
+  assert.equal(isExhausted(toSnapshot({ status: "rejected", resetsAt: soon, rateLimitType: "seven_day_opus", overageStatus: "rejected" } as any)), false);
+  const { markWorking } = await import("../src/usage.js");
+  assert.equal(isExhausted(markWorking(out)), false); // a real reply clears it
 });
 
 test("connections: add servers from a URL or a command; /mcp and /apps open connections", async () => {

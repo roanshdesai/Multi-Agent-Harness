@@ -107,7 +107,7 @@ function welcome() {
   w.append(
     el("div", "kicker label-mono", `${folder} · ${new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}`),
     el("h2", "", greeting()),
-    el("p", "lede", `Describe a task. ${shortModel(info?.models.main ?? "claude-opus-5-5")} plans it and hands the pieces to the team: Fable for code and hard calls, Sonnet for research, GPT for images and UI tests${mine ? `, plus your ${mine} subagent${mine === 1 ? "" : "s"}` : ""}.`),
+    el("p", "lede", `Describe a task. ${shortModel(info?.models.main)} plans it and hands the pieces to the team: ${shortModel(info?.models.coder)} for code and hard calls, ${shortModel(info?.models.worker)} for research, ${shortModel(info?.models.image)} for images and ${shortModel(info?.models.gui)} for UI tests${mine ? `, plus your ${mine} subagent${mine === 1 ? "" : "s"}` : ""}.`),
   );
   const cols = el("div", "cols");
   const starters = el("div");
@@ -1014,8 +1014,8 @@ async function openDoc(path) {
 
 // ── memory viewers ─────────────────────────────────────────────────────────
 const MEM = {
-  claudeMem: { title: "claude-mem", start: ["claude-mem runs inside Claude Code. Open Claude Code once in any project so its worker starts.", "Its viewer is usually at localhost:37777 (yours showed 37701)."] },
-  hindsight: { title: "Hindsight", start: ["Start it from the agent-harness folder:", "docker compose up -d hindsight", "The web UI runs on localhost:9999 and the API on 8888."] },
+  claudeMem: { title: "claude-mem", start: ["claude-mem runs inside Claude Code. Open Claude Code once in any project so its worker starts.", "Its viewer port is set under memory.claude_mem in harness.config.yaml."] },
+  hindsight: { title: "Hindsight", start: ["Start it from the agent-harness folder:", "docker compose up -d hindsight", "Its web UI address is set under memory.hindsight in harness.config.yaml."] },
 };
 async function openMemory(key) {
   for (const [id, t] of tabs) if (t.type === "memory" && t.mem === key) return activate(id);

@@ -21,7 +21,7 @@ import { pushApprovalHook, stuckDetector, type Ask } from "./guards.js";
 import { assertClaudeSubscription, subscriptionEnv } from "./subscription.js";
 import { HARNESS_COMMANDS, mergeCommands, type CommandInfo } from "./commands.js";
 import { loadCustomServers, loadDisabled, readConnections, type ConnectionInfo } from "./connections.js";
-import { toSnapshot, saveUsage, loadUsage, isExhausted, type UsageSnapshot } from "./usage.js";
+import { toSnapshot, markWorking, saveUsage, loadUsage, isExhausted, type UsageSnapshot } from "./usage.js";
 
 /** A pushable stream of user messages, so a running task can take corrections (/change). */
 export function inputChannel() {
@@ -307,6 +307,12 @@ export class Harness {
         this.onUsage?.(this.usage);
       }
       if (m.type === "assistant" && m.error === "rate_limit") res.rateLimited = true;
+      else if (m.type === "assistant" && !m.error && this.usage?.status === "rejected") {
+        // A real reply came back, so the saved "out of usage" is stale.
+        this.usage = markWorking(this.usage);
+        saveUsage(this.cfg, this.usage);
+        this.onUsage?.(this.usage);
+      }
       if (m.type === "assistant") {
         for (const b of m.message.content) {
           if (b.type === "tool_use" && (b.name === "Agent" || b.name === "Task")) {
