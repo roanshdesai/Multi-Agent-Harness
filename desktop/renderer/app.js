@@ -414,6 +414,7 @@ function append(s, node) {
   const stick = atBottom(s.view);
   s.empty.hidden = true;
   s.view.appendChild(node);
+  if (s.workingEl && node !== s.workingEl) s.view.appendChild(s.workingEl); // keep "working…" last
   s.logInner = null; // the next agent step starts a new log segment
   if (stick) s.view.scrollTop = s.view.scrollHeight;
   return node;
@@ -427,6 +428,7 @@ function logAppend(s, node) {
     const stick = atBottom(s.view);
     s.empty.hidden = true;
     s.view.appendChild(wrap);
+    if (s.workingEl) s.view.appendChild(s.workingEl); // keep "working…" last
     if (stick) s.view.scrollTop = s.view.scrollHeight;
   }
   const stick = atBottom(s.view);
@@ -462,7 +464,46 @@ function addAssistant(s, text) {
   b.innerHTML = md(text);
   append(s, m);
 }
+// ── "working…" line: what the agent is doing right now, until the reply arrives ──
+const short = (t, n = 72) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+function describeTool(name, summary) {
+  const what = short(String(summary ?? "").trim());
+  const file = what.split(/[\\/]/).pop();
+  if (name === "Bash") return what ? `Running ${what}` : "Running a command";
+  if (name === "Read") return `Reading ${file || "a file"}`;
+  if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(name)) return `Editing ${file || "a file"}`;
+  if (name === "Grep" || name === "Glob") return what ? `Searching for ${what}` : "Searching the code";
+  if (name === "WebSearch") return what ? `Searching the web: ${what}` : "Searching the web";
+  if (name === "WebFetch") return what ? `Reading ${what}` : "Reading a web page";
+  if (name === "TodoWrite") return "Planning the steps";
+  if (name === "ToolSearch") return "Looking up tools";
+  const m = name.match(/^mcp__(.+?)__(.+)$/);
+  if (m) return `Using ${m[1].replace(/^(plugin_|claude_ai_)/, "").replace(/_/g, " ")}: ${m[2].replace(/[_-]/g, " ")}`;
+  return what ? `${name}: ${what}` : name;
+}
+function setWorking(s, text) {
+  if (!s.workingEl) {
+    const w = el("div", "working");
+    w.append(el("span", "spin"), el("span", "w-what"), el("span", "w-time mono"));
+    s.workingEl = w;
+    s.workingSince = Date.now();
+    append(s, w);
+  }
+  s.workingEl.querySelector(".w-what").textContent = text;
+  s.workingEl.hidden = !!s.live; // the reply itself is streaming: it shows progress already
+  tickWorking(s);
+}
+function tickWorking(s) {
+  if (!s.workingEl) return;
+  const sec = Math.floor((Date.now() - s.workingSince) / 1000);
+  s.workingEl.querySelector(".w-time").textContent = sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`;
+}
+function stopWorking(s) {
+  s.workingEl?.remove();
+  s.workingEl = null;
+}
 function startLive(s) {
+  if (s.workingEl) s.workingEl.hidden = true;
   const { m, b } = assistantShell(s);
   b.classList.add("streaming");
   s.live = b;
@@ -712,9 +753,12 @@ api.onEvent(({ tabId, event: e }) => {
   switch (e.type) {
     case "user":
       addUser(s, e.text, e.source, e.queued, e.change);
+      if (!e.queued && !e.change) setWorking(s, "Thinking");
       break;
     case "busy":
+      if (e.busy && !s.workingEl) setWorking(s, "Thinking");
       if (!e.busy) {
+        stopWorking(s);
         endLive(s);
         finishAgents(s);
         refreshChats();
@@ -732,15 +776,19 @@ api.onEvent(({ tabId, event: e }) => {
       break;
     case "text":
       endLive(s, e.text);
+      if (s.workingEl) setWorking(s, "Thinking");
       break;
     case "agent":
       addAgent(s, e.id, e.agent, e.description);
+      setWorking(s, `${e.agent} is working: ${short(e.description || "", 60)}`);
       break;
     case "tool":
       addTool(s, e.name, e.summary, e.sub);
+      if (e.name !== "Agent" && e.name !== "Task" && e.name !== "AskUserQuestion") setWorking(s, e.sub && s.lastAgent ? `${describeTool(e.name, e.summary)}` : describeTool(e.name, e.summary));
       break;
     case "verify":
       addVerify(s, e);
+      if (e.status === "running") setWorking(s, `Verifying the work${e.round > 1 ? ` (round ${e.round})` : ""}`);
       break;
     case "turn-end": {
       endLive(s);
@@ -760,12 +808,15 @@ api.onEvent(({ tabId, event: e }) => {
       break;
     case "question":
       addQuestion(s, e.id, e.questions);
+      if (s.workingEl) setWorking(s, "Waiting for your answer");
       break;
     case "question-answered":
       markAnswered(s, e.id, e.answers);
+      if (s.workingEl) setWorking(s, "Thinking");
       break;
     case "advisor":
       addAdvice(s, e.status);
+      if (e.status === "asked") setWorking(s, "Consulting the advisor");
       break;
     case "handoff":
       addHandoff(s, e);
@@ -1374,8 +1425,16 @@ async function openDoc(path) {
 
 // ── memory viewers ─────────────────────────────────────────────────────────
 const MEM = {
-  claudeMem: { title: "claude-mem", start: ["claude-mem runs inside Claude Code. Open Claude Code once in any project so its worker starts.", "Its viewer port is set under memory.claude_mem in harness.config.yaml."] },
-  hindsight: { title: "Hindsight", start: ["Start it from the agent-harness folder:", "docker compose up -d hindsight", "Its web UI address is set under memory.hindsight in harness.config.yaml."] },
+  claudeMem: {
+    title: "claude-mem",
+    start: ["Session memory for Claude Code. Start its worker here; if it was never set up, run npx claude-mem install once in a terminal first.", "The app looks for its viewer on the port in ~/.claude-mem/settings.json, then the ones under memory.claude_mem in harness.config.yaml."],
+    button: "Start claude-mem",
+  },
+  hindsight: {
+    title: "Hindsight",
+    start: ["Long-term memory, run in Docker from this project's docker-compose.yml. Docker Desktop has to be open. The first start downloads it, which can take a few minutes.", "Its web UI address is set under memory.hindsight in harness.config.yaml."],
+    button: "Start Hindsight",
+  },
 };
 async function openMemory(key) {
   for (const [id, t] of tabs) if (t.type === "memory" && t.mem === key) return activate(id);
@@ -1397,13 +1456,50 @@ async function openMemory(key) {
   } else {
     const off = el("div", "mem-off");
     off.append(el("h2", "", `${MEM[key].title} isn't running`));
-    for (const line of MEM[key].start) off.appendChild(line.startsWith("docker") ? Object.assign(el("pre"), { textContent: line }) : el("p", "", line));
-    const retry = el("button", "btn primary", "Check again");
-    retry.onclick = async () => {
+    for (const line of MEM[key].start) off.appendChild(el("p", "", line));
+    const acts = el("div", "row-actions");
+    const status = el("p", "muted");
+    const out = el("pre", "mem-out");
+    out.hidden = true;
+    const reopen = async () => {
       await closeTab(s.id);
+      await refreshMemory();
       openMemory(key);
     };
-    off.appendChild(retry);
+    const show = (r) => {
+      status.textContent = r.detail;
+      status.className = r.ok && r.up !== false ? "muted" : "error-text";
+      out.textContent = r.output ?? "";
+      out.hidden = !r.output || (r.ok && r.up);
+    };
+    const start = el("button", "btn primary", MEM[key].button);
+    start.onclick = async () => {
+      start.disabled = true;
+      status.className = "muted";
+      status.textContent = "";
+      status.append(el("span", "spin"), document.createTextNode(key === "hindsight" ? " Starting Hindsight in Docker…" : " Starting claude-mem…"));
+      const r = await api.memoryStart(key).catch((err) => ({ ok: false, detail: err.message }));
+      start.disabled = false;
+      if (r.up) return reopen();
+      show(r);
+    };
+    acts.appendChild(start);
+    if (key === "claudeMem") {
+      const doc = el("button", "btn", "Diagnose");
+      doc.onclick = async () => {
+        doc.disabled = true;
+        status.textContent = "";
+        status.append(el("span", "spin"), document.createTextNode(" Running npx claude-mem doctor…"));
+        show(await api.memoryDoctor().catch((err) => ({ ok: false, detail: err.message })));
+        out.hidden = !out.textContent;
+        doc.disabled = false;
+      };
+      acts.appendChild(doc);
+    }
+    const retry = el("button", "btn", "Check again");
+    retry.onclick = reopen;
+    acts.appendChild(retry);
+    off.append(acts, status, out);
     s.view.appendChild(off);
   }
   activate(s.id);
@@ -2053,6 +2149,7 @@ document.addEventListener("keydown", (e) => {
 });
 setInterval(() => {
   const s = cur();
+  for (const t of tabs.values()) tickWorking(t);
   if (s?.type === "chat") setBusyUi(s.info.busy);
   renderStatus();
 }, 1000);

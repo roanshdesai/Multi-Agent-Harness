@@ -447,3 +447,11 @@ a { color: inherit; text-decoration-color: var(--ink-3); text-underline-offset: 
 .handoff .h-top .label-mono { color: var(--amber); }
 .handoff .h-body { font-size: 12.5px; color: var(--ink-2); margin: 4px 0 8px; }
 .handoff .h-body.muted { margin-bottom: 0; display: flex; align-items: center; gap: 6px; }
+.mem-out { max-height: 260px; overflow: auto; white-space: pre-wrap; font-size: 11.5px; color: var(--ink-2); }
+.error-text { color: var(--brick); font-size: 12.5px; }
+
+/* "working…" line under the thread while the agent works */
+.working { display: flex; align-items: center; gap: 8px; margin-top: 2px; margin-bottom: 16px; font-size: 12.5px; color: var(--ink-2); min-width: 0; }
+.working .w-what { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.working .w-time { color: var(--ink-3); font-size: 11px; flex: none; }
+.working .spin { border-top-color: var(--signal); }

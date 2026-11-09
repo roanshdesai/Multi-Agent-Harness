@@ -15,6 +15,7 @@ import { upsertSubagents, removeSubagent, type CustomSubagent } from "../subagen
 import { addServer, removeServer, setDisabled } from "../connections.js";
 import { claudeBin, openCommandInTerminal } from "../terminal.js";
 import { tokenStats } from "../token-stats.js";
+import { claudeMemUrls, startClaudeMem, claudeMemDoctor, startHindsight } from "../memory.js";
 import { listDocs, readDoc, summarizeDoc, cachedSummary } from "../docs.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -235,9 +236,22 @@ ipcMain.handle("agents", () => {
   }));
 });
 ipcMain.handle("memory-status", async () => ({
-  claudeMem: await firstUp(cfg.memory.claude_mem),
+  claudeMem: await firstUp(claudeMemUrls(cfg)),
   hindsight: await firstUp(cfg.memory.hindsight),
 }));
+// Start a memory service from the app, then wait (up to a minute) for its viewer to answer.
+ipcMain.handle("memory-start", async (_e, key: "claudeMem" | "hindsight") => {
+  const r = key === "hindsight" ? await startHindsight(cfg) : await startClaudeMem(cfg);
+  if (!r.ok) return { ...r, up: false };
+  const urls = key === "hindsight" ? cfg.memory.hindsight : claudeMemUrls(cfg);
+  for (let i = 0; i < 30; i++) {
+    const st = await firstUp(urls);
+    if (st.up) return { ...r, up: true, url: st.url };
+    await new Promise((res) => setTimeout(res, 2000));
+  }
+  return { ...r, up: false, detail: `${r.detail} It hasn't answered on ${urls.join(" or ")} yet.` };
+});
+ipcMain.handle("memory-doctor", () => claudeMemDoctor(cfg));
 ipcMain.handle("pick-workspace", async (e) => {
   const win = windows.get(wid(e.sender));
   const r = await dialog.showOpenDialog(win!, { properties: ["openDirectory", "createDirectory"], defaultPath: process.cwd() });

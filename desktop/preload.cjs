@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("harness", {
   design: (q) => invoke("design", q),
   agents: () => invoke("agents"),
   memoryStatus: () => invoke("memory-status"),
+  memoryStart: (key) => invoke("memory-start", key),
+  memoryDoctor: () => invoke("memory-doctor"),
   pickWorkspace: () => invoke("pick-workspace"),
   openConfig: () => invoke("open-config"),
   openDesignLibrary: () => invoke("open-design-library"),
