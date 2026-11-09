@@ -101,11 +101,35 @@ export function saveModels(cfg: HarnessConfig, changes: Partial<HarnessConfig["m
   return cfg.models;
 }
 
-export function loadConfig(root = process.env.HARNESS_ROOT ?? process.cwd()): HarnessConfig {
+/**
+ * Settings missing from `user` are taken from `defaults`, recursively; anything
+ * the user set (including lists) is kept as is.
+ */
+export function withDefaults<T>(user: T, defaults: unknown): T {
+  const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+  if (!isObj(user) || !isObj(defaults)) return user ?? (defaults as T);
+  const out: Record<string, unknown> = { ...user };
+  for (const [k, d] of Object.entries(defaults)) out[k] = k in user ? withDefaults(user[k], d) : d;
+  return out as T;
+}
+
+/**
+ * Load harness.config.yaml from `root`. `defaultsFile` (the packaged app's
+ * bundled config) fills in sections an older copy in ~/.agent-harness lacks,
+ * e.g. `memory:`, so the app doesn't lose Hindsight after an update.
+ */
+export function loadConfig(root = process.env.HARNESS_ROOT ?? process.cwd(), defaultsFile?: string): HarnessConfig {
   loadDotEnv(root);
   const file = resolve(root, process.env.HARNESS_CONFIG ?? "harness.config.yaml");
   if (!existsSync(file)) throw new Error(`Config not found: ${file}`);
-  const cfg = YAML.parse(expandEnv(readFileSync(file, "utf8"))) as HarnessConfig;
+  let cfg = YAML.parse(expandEnv(readFileSync(file, "utf8"))) as HarnessConfig;
+  if (defaultsFile && resolve(defaultsFile) !== file && existsSync(defaultsFile)) {
+    try {
+      cfg = withDefaults(cfg, YAML.parse(expandEnv(readFileSync(defaultsFile, "utf8"))));
+    } catch {
+      /* unreadable defaults: use the user's file alone */
+    }
+  }
   cfg.root = root;
   cfg.auth ??= { subscription_only: true };
   cfg.models.image ??= cfg.models.gui;

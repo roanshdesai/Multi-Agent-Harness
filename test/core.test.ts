@@ -699,3 +699,20 @@ test("Hindsight: a native macOS install is found by its launch agents", async ()
   writeFileSync(join(home, "Library", "LaunchAgents", "io.vectorize.hindsight-api.plist"), "<plist/>");
   assert.deepEqual(hindsightLaunchAgents(home), ["io.vectorize.hindsight-api"]);
 });
+
+test("config: an older data-folder config gets missing sections from the bundled defaults", async () => {
+  const { loadConfig } = await import("../src/config.js");
+  const root = mkdtempSync(join(tmpdir(), "root-"));
+  // An early copy, from before memory:, computer_use: and models.gpt existed.
+  writeFileSync(join(root, "harness.config.yaml"), "models:\n  main: my-main\n  gui: gpt-6-astra\n  gpt: [gpt-6-astra]\nmcp:\n  hindsight: true\ndesign_library: ./d.md\nplugins_dir: ./p\nchats_dir: ./c\n");
+  const defaults = join(root, "defaults.yaml");
+  writeFileSync(defaults, "models:\n  main: claude-opus-5-5\n  designer: claude-opus-5-5\n  gpt: [gpt-6-astra, gpt-6.1-sol]\nmemory:\n  claude_mem: [http://localhost:37701]\n  hindsight: [http://localhost:9999]\n  hindsight_mcp: http://localhost:8888/mcp/\nmcp:\n  hindsight: true\n  github: true\n");
+  const cfg = loadConfig(root, defaults);
+  assert.equal(cfg.models.main, "my-main"); // the user's choice wins
+  assert.deepEqual(cfg.models.gpt, ["gpt-6-astra"]); // lists aren't merged
+  assert.equal(cfg.models.designer, "claude-opus-5-5"); // missing role filled in
+  assert.deepEqual(cfg.memory.hindsight, ["http://localhost:9999"]);
+  assert.equal(cfg.memory.hindsight_mcp, "http://localhost:8888/mcp/");
+  assert.equal(cfg.mcp.github, true);
+  assert.deepEqual(loadConfig(root).memory.hindsight, []); // without defaults: as before
+});

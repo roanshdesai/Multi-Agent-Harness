@@ -66,7 +66,8 @@ function locateBundledBinaries() {
 locateBundledBinaries();
 
 const root = resolveRoot();
-const cfg: HarnessConfig = loadConfig(root);
+// Packaged: settings an older ~/.agent-harness/harness.config.yaml lacks come from the bundled one.
+const cfg: HarnessConfig = loadConfig(root, app.isPackaged ? join(process.resourcesPath, "seed", "harness.config.yaml") : undefined);
 const prefsFile = join(root, ".harness", "desktop.json");
 mkdirSync(dirname(prefsFile), { recursive: true });
 
@@ -389,9 +390,12 @@ ipcMain.handle("eval", async (_e, tabId: string, filter: string) => {
 app.setName("Multi-Agent Harness");
 // One app instance owns the terminal link; a second launch just focuses the first.
 if (!app.requestSingleInstanceLock()) app.quit();
+// Opening the app again while it runs: show its window, or open one if it was
+// closed (on macOS the app keeps running without windows).
 app.on("second-instance", () => {
   const w = [...windows.values()][0];
-  if (w) (w.isMinimized() && w.restore(), w.focus());
+  if (w) (w.isMinimized() && w.restore(), w.show(), w.focus());
+  else if (app.isReady()) createWindow();
 });
 app.whenReady().then(() => {
   // Let the claude-mem and Hindsight viewers (localhost only) load inside the app.
