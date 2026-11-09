@@ -42,7 +42,10 @@ export function buildExternalMcp(cfg: HarnessConfig): {
     },
   });
 
-  add("hindsight", ["HINDSIGHT_MCP_URL"], { type: "http", url: env("HINDSIGHT_MCP_URL") });
+  // Hindsight: .env's HINDSIGHT_MCP_URL, else memory.hindsight_mcp in harness.config.yaml.
+  const hindsightUrl = env("HINDSIGHT_MCP_URL") || cfg.memory?.hindsight_mcp || "";
+  if (cfg.mcp.hindsight && !hindsightUrl) skipped.push("hindsight (set memory.hindsight_mcp in harness.config.yaml)");
+  else if (cfg.mcp.hindsight) servers.hindsight = { type: "http", url: hindsightUrl };
 
   add("firecrawl", ["FIRECRAWL_API_KEY"], {
     command: "npx",

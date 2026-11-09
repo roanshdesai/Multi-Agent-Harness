@@ -34,7 +34,8 @@ export interface HarnessConfig {
   /** true/false toggles a built-in server; a URL adds a remote (HTTP) MCP server under that name. */
   mcp: Record<string, boolean | string>;
   auth: { subscription_only: boolean };
-  memory: { claude_mem: string[]; hindsight: string[] };
+  /** hindsight_mcp: the address agents use to read/write Hindsight memory (HINDSIGHT_MCP_URL in .env wins). */
+  memory: { claude_mem: string[]; hindsight: string[]; hindsight_mcp?: string };
   advisor: { auto: boolean };
   limits: { fallback_to_gpt: boolean; warn_at: number; refresh_minutes?: number };
   /** handoff_at: share of the context window (0-1) at which a hand-off summary is prepared. 0 turns it off. */

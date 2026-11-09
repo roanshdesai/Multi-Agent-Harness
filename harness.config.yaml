@@ -70,6 +70,8 @@ memory:
   # Viewers shown in the sidebar. The first address that answers is used.
   claude_mem: [http://localhost:37701, http://localhost:37777]
   hindsight: [http://localhost:9999, http://localhost:8888]
+  # Where the agents reach Hindsight's memory tools (HINDSIGHT_MCP_URL in .env overrides it)
+  hindsight_mcp: http://localhost:8888/mcp/
 
 # Your own subagents, made with /subagents (or edit the file by hand)
 subagents_file: ./subagents.yaml
