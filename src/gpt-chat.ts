@@ -17,7 +17,8 @@ interface StoredGptChat {
 
 const dirFor = (cfg: HarnessConfig) => join(cfg.root, ".harness", "gpt-chats");
 
-export function listGptChats(cfg: HarnessConfig, cwd: string): ChatSummary[] {
+/** GPT chats, for one folder or (without `cwd`) for every folder. */
+export function listGptChats(cfg: HarnessConfig, cwd?: string): ChatSummary[] {
   const dir = dirFor(cfg);
   if (!existsSync(dir)) return [];
   const out: ChatSummary[] = [];
@@ -25,7 +26,7 @@ export function listGptChats(cfg: HarnessConfig, cwd: string): ChatSummary[] {
     if (!f.endsWith(".json")) continue;
     try {
       const c = JSON.parse(readFileSync(join(dir, f), "utf8")) as StoredGptChat;
-      if (c.cwd === cwd) out.push({ id: c.id, title: c.title, updated: c.updated, kind: "gpt", model: c.model });
+      if (cwd === undefined || c.cwd === cwd) out.push({ id: c.id, title: c.title, updated: c.updated, kind: "gpt", model: c.model, cwd: c.cwd });
     } catch {
       /* skip unreadable */
     }

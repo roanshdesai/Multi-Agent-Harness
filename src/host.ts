@@ -119,9 +119,9 @@ export class Host {
   }
 
   /** Open a tab. With a chat id it resumes that chat (Claude or GPT). */
-  createTab(opts: { windowId: number; model?: string; chatId?: string; title?: string }): TabInfo {
+  createTab(opts: { windowId: number; model?: string; chatId?: string; title?: string; cwd?: string }): TabInfo {
     const id = `t${++seq}`;
-    const harness = new Harness(this.cfg, this.askFor(opts.windowId), this.workspace);
+    const harness = new Harness(this.cfg, this.askFor(opts.windowId), opts.cwd ?? this.workspace);
     if (this.plan) harness.plan = this.plan;
     if (this.commands) harness.commands = this.commands;
     const gptChat = opts.chatId ? isGptChat(this.cfg, opts.chatId) : false;
@@ -237,11 +237,14 @@ export class Host {
     return this.get(tabId).engine.btw(q);
   }
 
-  async openChat(tabId: string, chatId: string, title?: string): Promise<HistoryItem[]> {
+  /** Open a chat in a tab. A chat from another folder runs in that folder. */
+  async openChat(tabId: string, chatId: string, title?: string, cwd?: string): Promise<HistoryItem[]> {
     const t = this.get(tabId);
     if (t.engine.busy) throw new Error("This tab is busy. Open the chat in a new tab, or stop this one first.");
     const wantGpt = isGptChat(this.cfg, chatId);
-    if (wantGpt !== (t.engine.kind === "gpt")) t.engine = this.makeEngine(t, wantGpt ? this.cfg.models.gpt[0] : this.cfg.models.main);
+    const model = wantGpt ? this.cfg.models.gpt[0] : this.cfg.models.main;
+    if (cwd && cwd !== t.harness.cwd) this.retarget(t, cwd, model);
+    else if (wantGpt !== (t.engine.kind === "gpt")) t.engine = this.makeEngine(t, model);
     t.engine.resume(chatId);
     if (title) t.title = title;
     this.publishTabs();
@@ -289,15 +292,20 @@ export class Host {
     this.workspace = dir;
     for (const t of this.tabs.values()) {
       if (t.engine.busy || t.harness.cwd === dir) continue;
-      const harness = new Harness(this.cfg, this.askFor(t.windowId), dir);
-      harness.verifyEnabled = t.harness.verifyEnabled;
-      if (this.plan) harness.plan = this.plan;
-      if (this.commands) harness.commands = this.commands;
-      t.harness = harness;
-      t.engine = this.makeEngine(t, t.engine.model);
+      this.retarget(t, dir, t.engine.model);
       t.title = "New chat";
     }
     this.publishTabs();
+  }
+
+  /** Give an idle tab a fresh Harness and engine that work in `dir`. */
+  private retarget(t: Tab, dir: string, model: string) {
+    const harness = new Harness(this.cfg, this.askFor(t.windowId), dir);
+    harness.verifyEnabled = t.harness.verifyEnabled;
+    if (this.plan) harness.plan = this.plan;
+    if (this.commands) harness.commands = this.commands;
+    t.harness = harness;
+    t.engine = this.makeEngine(t, model);
   }
 
   setVerify(tabId: string, on: boolean) {
@@ -321,14 +329,15 @@ export class Host {
     return this.get(tabId).harness;
   }
 
-  /** Claude and GPT chats for the current folder, newest first. */
+  /** Claude and GPT chats from every folder on this computer, newest first. */
   async chats(limit = 100): Promise<ChatSummary[]> {
-    const claude = (await listSessions({ dir: this.workspace, limit })).map((s) => ({
+    const claude = (await listSessions({ limit })).map((s) => ({
       id: s.sessionId,
       title: s.customTitle ?? s.summary,
       updated: s.lastModified,
       kind: "claude" as const,
+      cwd: s.cwd,
     }));
-    return [...claude, ...listGptChats(this.cfg, this.workspace)].sort((a, b) => b.updated - a.updated).slice(0, limit);
+    return [...claude, ...listGptChats(this.cfg)].sort((a, b) => b.updated - a.updated).slice(0, limit);
   }
 }

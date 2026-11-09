@@ -352,6 +352,32 @@ test("workspace change: idle tabs move with fresh engines, busy tabs keep their 
   assert.equal(host.createTab({ windowId: 1 }).id && (host as any).get(`t${Number(c.id.slice(1)) + 1}`).harness.cwd, dir);
 });
 
+test("chats: listed from every folder; opening one runs it in its own folder", async () => {
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const { loadConfig } = await import("../src/config.js");
+  const { Host } = await import("../src/host.js");
+  const { GptChat, listGptChats } = await import("../src/gpt-chat.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const other = mkdtempSync(join(tmpdir(), "other-"));
+  await new Promise<void>((resolve) => {
+    const chat = new GptChat(cfg, cfg.models.gpt[0], (e) => e.type === "busy" && !e.busy && resolve(), other);
+    chat.send("hello from another folder");
+  });
+  assert.equal(listGptChats(cfg, process.cwd()).length, 0);
+  const all = listGptChats(cfg);
+  assert.equal(all.length, 1);
+  assert.equal(all[0].cwd, other);
+  const host = new Host(cfg, () => async () => "n");
+  const listed = (await host.chats()).find((c) => c.id === all[0].id);
+  assert.ok(listed, "GPT chat from another folder is listed");
+  const tab = host.createTab({ windowId: 1 });
+  await host.openChat(tab.id, all[0].id, "x", other);
+  assert.equal((host as any).get(tab.id).harness.cwd, other);
+  assert.equal((host as any).get(tab.id).engine.cwd, other);
+  delete process.env.HARNESS_CODEX_BIN;
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

@@ -1,4 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 const has = (bin: string) => spawnSync(process.platform === "win32" ? "where" : "which", [bin]).status === 0;
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -13,14 +16,38 @@ export function resumeCommand(sessionId: string): string[] {
  * Returns how it was opened, or null if no terminal could be found.
  */
 export function openInNewTerminal(sessionId: string, cwd: string): string | null {
-  const argv = resumeCommand(sessionId);
+  return openCommandInTerminal(resumeCommand(sessionId), cwd, `fork-${sessionId.slice(0, 6)}`);
+}
+
+/**
+ * The Claude Code binary: the packaged one, then `claude` on PATH, then the
+ * one the Agent SDK ships for this platform.
+ */
+export function claudeBin(): string | null {
+  if (process.env.HARNESS_CLAUDE_BIN && existsSync(process.env.HARNESS_CLAUDE_BIN)) return process.env.HARNESS_CLAUDE_BIN;
+  if (has("claude")) return "claude";
+  const exe = process.platform === "win32" ? ".exe" : "";
+  const req = createRequire(import.meta.url);
+  for (const pkg of [`claude-agent-sdk-${process.platform}-${process.arch}`, `claude-agent-sdk-${process.platform}-${process.arch}-musl`]) {
+    try {
+      const bin = join(dirname(req.resolve(`@anthropic-ai/${pkg}/package.json`)), `claude${exe}`);
+      if (existsSync(bin)) return bin;
+    } catch {
+      /* not installed for this platform */
+    }
+  }
+  return null;
+}
+
+/** Open a new terminal window running `argv` in `cwd`. Returns how, or null. */
+export function openCommandInTerminal(argv: string[], cwd: string, name = "harness"): string | null {
   const line = `cd ${shq(cwd)} && ${argv.map(shq).join(" ")}`;
   const detached = (cmd: string, args: string[]) => {
     spawn(cmd, args, { detached: true, stdio: "ignore", cwd }).unref();
   };
 
   if (process.env.TMUX) {
-    detached("tmux", ["new-window", "-n", `fork-${sessionId.slice(0, 6)}`, line]);
+    detached("tmux", ["new-window", "-n", name, line]);
     return "tmux window";
   }
   if (process.platform === "darwin") {

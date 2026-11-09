@@ -55,6 +55,8 @@ export interface ChatSummary {
   updated: number;
   kind?: "claude" | "gpt";
   model?: string;
+  /** Folder the chat ran in. */
+  cwd?: string;
 }
 
 /** What every chat engine (Claude or GPT) offers to the apps. */

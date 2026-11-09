@@ -187,7 +187,7 @@ a { color: inherit; text-decoration-color: var(--ink-3); text-underline-offset: 
 .r-model { font-size: 11.5px; color: var(--ink); }
 .mark { width: 6px; height: 6px; border-radius: 1.5px; background: var(--clay); flex: none; }
 .mark.gpt { background: var(--moss); }
-.welcome .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.welcome .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
 .welcome h3 { margin: 0 0 4px; color: var(--ink-3); font-weight: 400; }
 .starter { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--rule-2); background: none; padding: 7px 4px; color: var(--ink); font-size: 12.5px; border-radius: 0; }
 .starter:hover { background: var(--sel); }

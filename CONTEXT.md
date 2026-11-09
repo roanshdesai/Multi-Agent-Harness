@@ -72,13 +72,13 @@ Key SDK facts this project relies on (Agent SDK v0.3.x):
 
 ## Features (all shipped)
 
-Tabs (parallel tasks) · live terminal link · `/btw` · `/fork` (new window, or a new terminal window from the CLI) · `/change` (⌘Enter) · verifier · automatic advisor · `/subagents` (advisor designs, you approve) · Claude/GPT model picker per tab · image agent · `/usage` + automatic switch to GPT when Claude is out · agent questions (answer in app or terminal) · MCP servers & apps panel (`/connections`, `/mcp`, `/apps`) · Documents pane with PRD summaries (`/docs`, `/summarize`) · `/context` grid · memory viewers (claude-mem, Hindsight) · UI links library · evals · original UI (dark graphite palette with one signal accent, sans + mono type, dense layout, log-style agent timeline, instrument panel) · remote MCP servers by URL in `harness.config.yaml` (Pally).
+Tabs (parallel tasks) · live terminal link · `/btw` · `/fork` (new window, or a new terminal window from the CLI) · `/change` (⌘Enter) · verifier · automatic advisor · `/subagents` (advisor designs, you approve) · Claude/GPT model picker per tab · image agent · `/usage` + automatic switch to GPT when Claude is out · agent questions (answer in app or terminal) · MCP servers & apps panel (`/connections`, `/mcp`, `/apps`) · Documents pane with PRD summaries (`/docs`, `/summarize`) · `/context` grid · memory viewers (claude-mem, Hindsight) · UI links library · evals · original UI (dark graphite palette with one signal accent, sans + mono type, dense layout, log-style agent timeline, instrument panel) · add MCP servers from the app (URLs go into Claude Code's user list so sign-in works; Sign in opens `claude /mcp` in a terminal) · chats from every folder, opened in their own folder; Cloud sessions link to claude.ai/code.
 
 ## How to test
 
 ```bash
 npm install
-npx tsc --noEmit && npm test          # 21 unit tests
+npx tsc --noEmit && npm test          # 22 unit tests
 HARNESS_ALLOW_API=1 npm start         # only in containers without a subscription
 ```
 
@@ -93,6 +93,8 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 - Running on a Claude subscription login. Containers had API billing, so `HARNESS_ALLOW_API=1` was used.
 - Actually hitting the Claude usage limit; the switch to GPT is tested with a simulated limit.
 - The Mac `.dmg` and Windows installer. A Linux packaged build was tested.
+- Pally sign-in through the app's Sign in button (`claude /mcp`). The container can't reach agent.pally.com.
+- Listing cloud (claude.ai/code) sessions inside the app: the SDK has no API for it, so the Chats pane links out.
 - The Hindsight web UI port. 9999 is assumed; claude-mem is checked on 37701, then 37777.
 
 ## Open bugs
@@ -100,6 +102,8 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 None known.
 
 Fixed in the last review:
+- the Claude meter drew a full bar before any usage data (read as "out of usage"); it now starts empty
+- adding an MCP server from the app: re-adding a turned-off server stays off, errors were hidden, and there was no way to sign in from the app
 - "Claude usage is over" shown when it wasn't: a stale saved "rejected" snapshot (no reset time), or an extra-usage / single-model refusal, counted as out. Now it needs a future reset and a blocked plan window, and a successful reply clears it
 - hardcoded model names and memory ports in the UI text now come from the config
 - the start screen redraws after a folder change

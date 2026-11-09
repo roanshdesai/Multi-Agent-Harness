@@ -61,6 +61,10 @@ const icon = (name, cls = "") => {
 };
 const md = (text) => DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: false }));
 const isGpt = (m) => /^gpt-/i.test(m || "");
+/** Last part of a folder path, for chat rows. */
+function folderName(p) {
+  return (p ?? "").split(/[\\/]/).filter(Boolean).pop() ?? "";
+}
 function shortModel(id = "") {
   if (/^gpt-/i.test(id)) return id.replace(/^gpt-([\d.]+)-?/i, "GPT-$1 ").replace(/\b[a-z]/g, (c) => c.toUpperCase()).trim();
   return id.replace(/^claude-/, "").replace(/-(\d)-(\d)$/, " $1.$2").replace(/^./, (c) => c.toUpperCase());
@@ -143,10 +147,10 @@ function welcome() {
   }
   const recent = el("div", "w-col");
   recent.append(el("h3", "label-mono", "Recent"));
-  if (!allChats.length) recent.append(el("p", "muted", "No chats in this folder yet."));
+  if (!allChats.length) recent.append(el("p", "muted", "No chats yet."));
   for (const c of allChats.slice(0, 6)) {
     const b = el("button", "starter");
-    b.append(el("span", `mark${c.kind === "gpt" ? " gpt" : ""}`), el("span", "txt", c.title || "Untitled"), el("small", "", groupLabel(c.updated)));
+    b.append(el("span", `mark${c.kind === "gpt" ? " gpt" : ""}`), el("span", "txt", c.title || "Untitled"), el("small", "", `${folderName(c.cwd)} · ${groupLabel(c.updated)}`));
     b.onclick = () => openChat(c);
     recent.append(b);
   }
@@ -676,6 +680,8 @@ function renderStatus() {
   const line = el("span", "meter-line");
   const fill = el("i");
   line.appendChild(fill);
+  fill.style.width = "0%"; // empty until Claude reports usage; a full bar would read as "out"
+  su.className = "inst";
   su.append(el("span", "k", "Claude"), line, uv);
   if (w && w.utilization != null) {
     const pct = Math.round(w.utilization * 100);
@@ -779,17 +785,23 @@ function renderPane() {
     const open = new Set([...tabs.values()].filter((t) => t.type === "chat" && t.info.sessionId).map((t) => t.info.sessionId));
     const sid = cur()?.info?.sessionId;
     const groups = new Map();
-    for (const c of allChats.filter((c) => match(c.title))) {
+    for (const c of allChats.filter((c) => match(c.title) || match(c.cwd ?? ""))) {
       const g = groupLabel(c.updated);
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g).push(c);
     }
-    if (!groups.size) body.appendChild(el("div", "empty-pane", q ? "No matching chats." : "No chats in this folder yet."));
+    if (!groups.size) body.appendChild(el("div", "empty-pane", q ? "No matching chats." : "No chats yet."));
+    const cloud = el("button", "row cloud-row");
+    cloud.append(icon("chat"), el("span", "t", "Cloud sessions"), el("span", "rmeta", "claude.ai ↗"));
+    cloud.title = "Chats that run in the cloud (Claude Code on the web) open in your browser.";
+    cloud.onclick = () => window.open("https://claude.ai/code");
     for (const [g, list] of groups)
       section(body, `chats:${g}`, g, list.length, () => {
         for (const c of list) {
           const r = el("button", `row${c.id === sid ? " active" : ""}`);
-          r.append(icon("chat"), el("span", "t", c.title || "Untitled"));
+          const st = el("span", "stack");
+          st.append(el("span", "t", c.title || "Untitled"), el("span", "sub", folderName(c.cwd)));
+          r.append(icon("chat"), st);
           if (c.kind === "gpt") r.append(el("span", "label ok", "GPT"));
           if (open.has(c.id)) r.append(el("span", "rmeta", "open"));
           r.title = c.title;
@@ -797,6 +809,7 @@ function renderPane() {
           body.appendChild(r);
         }
       });
+    body.appendChild(cloud);
   } else if (pane === "docs") {
     paneActions([["refresh", "Refresh", () => refreshDocs()]]);
     const list = docs.filter((d) => match(d.rel));
@@ -918,7 +931,7 @@ async function openChat(c) {
   const s = cur();
   if (s && s.type === "chat" && !s.info.sessionId && !s.info.busy) {
     try {
-      const history = await api.openChat(s.id, c.id, c.title);
+      const history = await api.openChat(s.id, c.id, c.title, c.cwd);
       s.loaded = true;
       renderHistory(s, history);
       s.context = null;
@@ -929,7 +942,7 @@ async function openChat(c) {
     }
     return;
   }
-  const t = await newTab({ chatId: c.id, title: c.title });
+  const t = await newTab({ chatId: c.id, title: c.title, cwd: c.cwd });
   t.loaded = true;
   renderHistory(t, await api.tabHistory(t.id));
 }
@@ -1197,10 +1210,23 @@ async function showConnections(focusAdd = false) {
       const r = el("div", "list-row");
       const name = el("div", "name", c.name);
       name.appendChild(el("span", "label", c.source));
-      const detail = c.status === "connected" ? `${c.tools} tool${c.tools === 1 ? "" : "s"}${c.target ? ` · ${c.target}` : ""}` : c.status === "needs-auth" ? "Needs sign-in: open Claude Code (claude), run /mcp, sign in" : c.status === "disabled" ? "Turned off" : c.error || c.target || c.status;
+      const detail = c.status === "connected" ? `${c.tools} tool${c.tools === 1 ? "" : "s"}${c.target ? ` · ${c.target}` : ""}` : c.status === "needs-auth" ? "Needs sign-in. Click Sign in, pick the server in the list, then come back and Refresh" : c.status === "disabled" ? "Turned off" : c.error || c.target || c.status;
       const sub = el("div", "sub", detail);
       sub.title = detail;
       const acts = el("div", "acts");
+      if (c.signIn) {
+        const si = el("button", "btn sm primary", "Sign in");
+        si.onclick = async () => {
+          try {
+            await api.mcpSignIn();
+            si.textContent = "Opened in terminal";
+          } catch (err) {
+            si.textContent = "Couldn't open";
+            si.title = err.message;
+          }
+        };
+        acts.appendChild(si);
+      }
       if (["failed", "needs-auth", "pending"].includes(c.status)) {
         const rc = el("button", "btn sm", "Reconnect");
         rc.onclick = () => render(c.name);
@@ -1224,17 +1250,24 @@ async function showConnections(focusAdd = false) {
     const spec = el("input", "input");
     spec.placeholder = "URL (https://…) or command (npx -y some-mcp-server)";
     const add = el("button", "btn primary", "Add");
+    const msg = el("p", "muted");
     add.onclick = async () => {
+      if (!nm.value.trim() || !spec.value.trim()) return (msg.textContent = "Give it a name and a URL or command.");
+      add.disabled = true;
+      msg.textContent = "Adding…";
       try {
-        await api.mcpAdd(nm.value, spec.value);
+        const r = await api.mcpAdd(nm.value, spec.value);
         render();
-      } catch {
-        add.textContent = "Check name & address";
+        if (r?.note) setTimeout(() => box.appendChild(el("p", "muted", r.note)), 0);
+      } catch (err) {
+        msg.textContent = String(err.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+        add.disabled = false;
       }
     };
     form.append(nm, spec, add);
     box.appendChild(form);
-    box.appendChild(el("p", "muted", "Saved in mcp-servers.json; available to every tab from the next message. Servers from your Claude Code setup and claude.ai connectors appear here automatically."));
+    box.appendChild(msg);
+    box.appendChild(el("p", "muted", "A URL (like https://agent.pally.com/mcp) is added to Claude Code's server list, so you can sign in to it. A command is saved in mcp-servers.json. Either way every tab can use it from the next message."));
     if (focusAdd) nm.focus();
   };
   modal("MCP servers & apps", box);

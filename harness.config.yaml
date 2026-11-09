@@ -79,5 +79,3 @@ mcp:
   exa: true
   context7: true
   playwright: true
-  # Remote MCP servers: give a name and its URL.
-  pally: https://agent.pally.com/mcp

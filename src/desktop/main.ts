@@ -12,7 +12,8 @@ import { runEvals } from "../eval.js";
 import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "../tools/design-library.js";
 import { codexStatus } from "../subscription.js";
 import { upsertSubagents, removeSubagent, type CustomSubagent } from "../subagents.js";
-import { saveCustomServer, removeCustomServer, setDisabled, parseServerSpec } from "../connections.js";
+import { addServer, removeServer, setDisabled } from "../connections.js";
+import { claudeBin, openCommandInTerminal } from "../terminal.js";
 import { listDocs, readDoc, summarizeDoc, cachedSummary } from "../docs.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -249,8 +250,16 @@ ipcMain.handle("open-subagents-file", () => shell.openPath(cfg.subagents_file));
 ipcMain.handle("usage", () => ({ usage: host.usage, limited: host.claudeLimited, gpt: cfg.models.gpt[0], codex: codexStatus(cfg.root) }));
 ipcMain.handle("connections", (_e, reconnect?: string) => host.connections(reconnect));
 ipcMain.handle("mcp-toggle", (_e, name: string, enabled: boolean) => setDisabled(cfg, name, !enabled));
-ipcMain.handle("mcp-add", (_e, name: string, spec: string) => saveCustomServer(cfg, name, parseServerSpec(spec)));
-ipcMain.handle("mcp-remove", (_e, name: string) => removeCustomServer(cfg, name));
+ipcMain.handle("mcp-add", (_e, name: string, spec: string) => addServer(cfg, name, spec));
+ipcMain.handle("mcp-remove", (_e, name: string) => removeServer(cfg, name));
+// Sign in to an MCP server: Claude Code's /mcp screen in a terminal (the SDK has no sign-in call).
+ipcMain.handle("mcp-signin", () => {
+  const bin = claudeBin();
+  if (!bin) throw new Error("Install Claude Code first (npm i -g @anthropic-ai/claude-code).");
+  const how = openCommandInTerminal([bin, "/mcp"], process.cwd(), "mcp-sign-in");
+  if (!how) throw new Error("Couldn't open a terminal. Run: claude, then type /mcp");
+  return how;
+});
 ipcMain.handle("answer", (_e, tabId: string, id: string, answers: Record<string, string>) => host.answer(tabId, id, answers));
 ipcMain.handle("change", (_e, tabId: string, text: string) => host.change(tabId, text, "app"));
 ipcMain.handle("context", (_e, tabId: string) => host.context(tabId));
@@ -271,7 +280,7 @@ ipcMain.handle("subagents-save", (_e, list: CustomSubagent[]) => upsertSubagents
 ipcMain.handle("subagents-remove", (_e, name: string) => removeSubagent(cfg, name));
 
 // ── IPC: per tab ────────────────────────────────────────────────────────────
-ipcMain.handle("tab-new", (e, opts: { model?: string; chatId?: string; title?: string } = {}) =>
+ipcMain.handle("tab-new", (e, opts: { model?: string; chatId?: string; title?: string; cwd?: string } = {}) =>
   host.createTab({ windowId: wid(e.sender), ...opts }),
 );
 ipcMain.handle("tab-close", (_e, tabId: string) => host.closeTab(tabId));
@@ -281,7 +290,7 @@ ipcMain.handle("send", (_e, tabId: string, text: string) => host.send(tabId, tex
 ipcMain.handle("stop", (_e, tabId: string) => host.stop(tabId));
 ipcMain.handle("btw", (_e, tabId: string, q: string) => host.btw(tabId, q));
 ipcMain.handle("new-chat", (_e, tabId: string) => host.newChat(tabId));
-ipcMain.handle("open-chat", (_e, tabId: string, chatId: string, title?: string) => host.openChat(tabId, chatId, title));
+ipcMain.handle("open-chat", (_e, tabId: string, chatId: string, title?: string, cwd?: string) => host.openChat(tabId, chatId, title, cwd));
 ipcMain.handle("rename", (_e, tabId: string, title: string) => host.rename(tabId, title));
 ipcMain.handle("set-verify", (_e, tabId: string, on: boolean) => host.setVerify(tabId, on));
 ipcMain.handle("set-model", (_e, tabId: string, model: string) => host.setModel(tabId, model));
