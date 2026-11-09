@@ -23,6 +23,8 @@ interface Tab {
   engine: Engine;
   harness: Harness;
   title: string;
+  /** Set while the tab is moving to GPT; messages sent meanwhile wait here. */
+  switching?: { text: string; source: string }[];
 }
 
 export type HostListener = (msg: { type: "event"; tabId: string; event: ChatEvent } | { type: "tabs"; tabs: TabInfo[] }) => void;
@@ -44,6 +46,8 @@ export class Host {
   commands?: Harness["commands"];
   /** Latest Claude usage seen by any tab. */
   usage: UsageSnapshot | null;
+  /** Folder new tabs (and idle tabs after a change) work in. */
+  workspace = process.cwd();
   /** Files the agents read or edited this session (for the Documents pane). */
   touched = new Map<string, "read" | "edited">();
 
@@ -108,8 +112,8 @@ export class Host {
       if (event.type === "limit") void this.fallbackToGpt(tab.id, event.prompt);
       if (event.type === "busy" || event.type === "session") this.publishTabs();
     };
-    if (isGpt(model)) return new GptChat(this.cfg, model, emit);
-    const engine = new ChatEngine(tab.harness, emit, { stream: true });
+    if (isGpt(model)) return new GptChat(this.cfg, model, emit, tab.harness.cwd);
+    const engine = new ChatEngine(tab.harness, emit, { stream: true, cwd: tab.harness.cwd });
     if (model !== this.cfg.models.main) tab.harness.modelOverride = model;
     return engine;
   }
@@ -117,7 +121,7 @@ export class Host {
   /** Open a tab. With a chat id it resumes that chat (Claude or GPT). */
   createTab(opts: { windowId: number; model?: string; chatId?: string; title?: string }): TabInfo {
     const id = `t${++seq}`;
-    const harness = new Harness(this.cfg, this.askFor(opts.windowId));
+    const harness = new Harness(this.cfg, this.askFor(opts.windowId), this.workspace);
     if (this.plan) harness.plan = this.plan;
     if (this.commands) harness.commands = this.commands;
     const gptChat = opts.chatId ? isGptChat(this.cfg, opts.chatId) : false;
@@ -148,23 +152,38 @@ export class Host {
       this.note(tabId, `Claude's usage limit is reached${resets ? ` (resets ${resets})` : ""}. Pick a GPT model at the top to keep going.`);
       return;
     }
-    const sid = t.engine.sessionId;
-    const history = sid ? await t.engine.history(sid).catch(() => []) : [];
-    const transcript = history
-      .slice(-30)
-      .map((h) => `${h.role === "user" ? "User" : h.role === "assistant" ? "Assistant" : `(${h.role})`}: ${h.text.slice(0, 1500)}`)
-      .join("\n");
+    // Swap the engine before any await, so a message sent while the history
+    // loads goes to GPT (queued until it is seeded), not back to Claude.
+    const claude = t.engine;
     const gpt = this.makeEngine(t, this.cfg.models.gpt[0]) as GptChat;
-    gpt.seed(
-      `You are continuing a task that was running on Claude until its usage limit was reached. Here is the conversation so far:\n\n${transcript || "(no earlier messages)"}\n\nPick up where it left off. The user's latest request follows.`,
-    );
     t.engine = gpt;
-    this.note(tabId, `Claude's usage limit is reached${resets ? ` (resets ${resets})` : ""}. Continuing this task on ${this.cfg.models.gpt[0]} with your ChatGPT plan.`);
+    t.switching = [];
     this.publishTabs();
-    gpt.send(prompt, "auto");
+    try {
+      const sid = claude.sessionId;
+      const history = sid ? await claude.history(sid).catch(() => []) : [];
+      const transcript = history
+        .slice(-30)
+        .map((h) => `${h.role === "user" ? "User" : h.role === "assistant" ? "Assistant" : `(${h.role})`}: ${h.text.slice(0, 1500)}`)
+        .join("\n");
+      gpt.seed(
+        `You are continuing a task that was running on Claude until its usage limit was reached. Here is the conversation so far:\n\n${transcript || "(no earlier messages)"}\n\nPick up where it left off. The user's latest request follows.`,
+      );
+    } finally {
+      const waiting = t.switching ?? [];
+      t.switching = undefined;
+      if (t.engine === gpt) {
+        this.note(tabId, `Claude's usage limit is reached${resets ? ` (resets ${resets})` : ""}. Continuing this task on ${this.cfg.models.gpt[0]} with your ChatGPT plan.`);
+        gpt.send(prompt, "auto");
+        for (const m of waiting) gpt.send(m.text, m.source);
+      } else {
+        for (const m of waiting) t.engine.send(m.text, m.source);
+      }
+    }
   }
 
   change(tabId: string, text: string, source = "app") {
+    if (this.get(tabId).switching) return this.send(tabId, text, source);
     this.get(tabId).engine.change(text, source);
   }
 
@@ -201,7 +220,13 @@ export class Host {
   send(tabId: string, text: string, source = "app") {
     const t = this.get(tabId);
     const [cmd, ...rest] = text.trim().split(/\s+/);
-    t.engine.send(expandShortcut(cmd, rest.join(" ")) ?? text, source);
+    const msg = expandShortcut(cmd, rest.join(" ")) ?? text;
+    if (t.switching) {
+      t.switching.push({ text: msg, source });
+      this.broadcast({ type: "event", tabId, event: { type: "user", text: msg, source, queued: true } });
+      return;
+    }
+    t.engine.send(msg, source);
   }
 
   stop(tabId: string) {
@@ -255,6 +280,26 @@ export class Host {
     return { tabId: info.id, newTab: true };
   }
 
+  /**
+   * Point the app at a new folder. Idle tabs move to it with a fresh chat (new
+   * Harness and engine, so GPT tabs pick it up too). Busy tabs keep their folder
+   * until they are closed, so a running task never changes folder mid-way.
+   */
+  setWorkspace(dir: string) {
+    this.workspace = dir;
+    for (const t of this.tabs.values()) {
+      if (t.engine.busy || t.harness.cwd === dir) continue;
+      const harness = new Harness(this.cfg, this.askFor(t.windowId), dir);
+      harness.verifyEnabled = t.harness.verifyEnabled;
+      if (this.plan) harness.plan = this.plan;
+      if (this.commands) harness.commands = this.commands;
+      t.harness = harness;
+      t.engine = this.makeEngine(t, t.engine.model);
+      t.title = "New chat";
+    }
+    this.publishTabs();
+  }
+
   setVerify(tabId: string, on: boolean) {
     this.get(tabId).harness.verifyEnabled = on;
     this.publishTabs();
@@ -278,12 +323,12 @@ export class Host {
 
   /** Claude and GPT chats for the current folder, newest first. */
   async chats(limit = 100): Promise<ChatSummary[]> {
-    const claude = (await listSessions({ dir: process.cwd(), limit })).map((s) => ({
+    const claude = (await listSessions({ dir: this.workspace, limit })).map((s) => ({
       id: s.sessionId,
       title: s.customTitle ?? s.summary,
       updated: s.lastModified,
       kind: "claude" as const,
     }));
-    return [...claude, ...listGptChats(this.cfg, process.cwd())].sort((a, b) => b.updated - a.updated).slice(0, limit);
+    return [...claude, ...listGptChats(this.cfg, this.workspace)].sort((a, b) => b.updated - a.updated).slice(0, limit);
   }
 }

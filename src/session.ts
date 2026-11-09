@@ -181,6 +181,8 @@ export class Harness {
   constructor(
     readonly cfg: HarnessConfig,
     private ask: Ask,
+    /** Workspace folder for this harness, fixed at creation so a later folder change can't move a running tab. */
+    readonly cwd: string = process.cwd(),
   ) {
     this.mcpSkipped = buildExternalMcp(cfg).skipped;
     this.plugins = discoverPlugins(cfg.plugins_dir);
@@ -208,7 +210,7 @@ export class Harness {
     });
     const stuck = stuckDetector(cfg);
     return {
-      cwd: process.cwd(),
+      cwd: this.cwd,
       // Subscription-only: strip every API-key credential so billing can't fall back to the API.
       ...(cfg.auth.subscription_only && { env: subscriptionEnv() }),
       // Packaged desktop app: the engine binary lives outside the asar archive.

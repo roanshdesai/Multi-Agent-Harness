@@ -293,6 +293,59 @@ test("out of Claude usage: the tab carries the conversation over to GPT and re-s
   delete process.env.HARNESS_CODEX_BIN;
 });
 
+test("switching to GPT: a message sent while the history loads goes to GPT, after the hand-off", async () => {
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const { loadConfig } = await import("../src/config.js");
+  const { Host } = await import("../src/host.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const host = new Host(cfg, () => async () => "n");
+  const events: any[] = [];
+  host.listen((m) => m.type === "event" && events.push(m.event));
+  const tab = host.createTab({ windowId: 1 });
+  const claude = (host as any).get(tab.id).engine;
+  let release!: () => void;
+  claude.sessionId = "fake-session";
+  claude.history = () => new Promise((r) => (release = () => r([{ role: "user", text: "earlier" }])));
+  let claudeGot = false;
+  claude.send = () => (claudeGot = true);
+  const switching = (host as any).fallbackToGpt(tab.id, "finish the report");
+  assert.equal(host.list()[0].kind, "gpt"); // swapped before the await
+  host.send(tab.id, "and add a summary");
+  release();
+  await switching;
+  const t0 = Date.now();
+  while (events.filter((e) => e.type === "text").length < 2 && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(claudeGot, false);
+  const texts = events.filter((e) => e.type === "text").map((e) => e.text);
+  assert.match(texts[0], /continuing a task[\s\S]*earlier[\s\S]*finish the report/); // seeded first
+  assert.match(texts[1], /and add a summary/); // the gap message ran on GPT, after the hand-off
+  delete process.env.HARNESS_CODEX_BIN;
+});
+
+test("workspace change: idle tabs move with fresh engines, busy tabs keep their folder", async () => {
+  const { loadConfig } = await import("../src/config.js");
+  const { Host } = await import("../src/host.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const host = new Host(cfg, () => async () => "n");
+  const a = host.createTab({ windowId: 1 });
+  const b = host.createTab({ windowId: 1, model: cfg.models.gpt[0] });
+  const c = host.createTab({ windowId: 1 });
+  const before = (host as any).get(c.id);
+  Object.defineProperty(before.engine, "busy", { get: () => true });
+  const oldDir = before.harness.cwd;
+  const dir = mkdtempSync(join(tmpdir(), "ws-"));
+  host.setWorkspace(dir);
+  assert.equal((host as any).get(a.id).harness.cwd, dir);
+  assert.equal((host as any).get(a.id).harness.options().cwd, dir);
+  assert.equal((host as any).get(a.id).engine.cwd, dir);
+  assert.equal((host as any).get(b.id).engine.cwd, dir); // GPT engine recreated in the new folder
+  assert.equal((host as any).get(c.id).harness.cwd, oldDir); // busy tab untouched
+  assert.equal((host as any).get(c.id).engine, before.engine);
+  assert.equal(host.createTab({ windowId: 1 }).id && (host as any).get(`t${Number(c.id.slice(1)) + 1}`).harness.cwd, dir);
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

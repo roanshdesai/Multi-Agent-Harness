@@ -54,7 +54,7 @@ export class GptChat implements Engine {
     private cfg: HarnessConfig,
     public model: string,
     private emit: (e: ChatEvent) => void,
-    private cwd = process.cwd(),
+    readonly cwd = process.cwd(),
   ) {}
 
   private file(id: string) {

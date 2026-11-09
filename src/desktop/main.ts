@@ -238,7 +238,7 @@ ipcMain.handle("pick-workspace", async (e) => {
   prefs = { ...prefs, workspace: r.filePaths[0] };
   savePrefs();
   process.chdir(prefs.workspace);
-  for (const t of host.list()) if (!t.busy) host.newChat(t.id);
+  host.setWorkspace(prefs.workspace);
   return prefs.workspace;
 });
 ipcMain.handle("open-config", () => shell.openPath(join(cfg.root, "harness.config.yaml")));

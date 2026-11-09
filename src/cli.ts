@@ -43,12 +43,35 @@ mkdirSync(join(cfg.root, ".harness"), { recursive: true });
 
 // ── input plumbing: one readline shared by the prompt and approvals ─────────
 const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY });
-let pendingAsk: ((answer: string) => void) | null = null;
-const ask = (question: string) =>
+// Prompts waiting for a line, oldest first. Only the head is shown; a push
+// approval and an agent question arriving together each get their own turn.
+interface PendingAsk {
+  question: string;
+  resolve: (answer: string) => void;
+  /** Agent question id, so an answer given in the app cancels only that prompt. */
+  tag?: string;
+}
+const asks: PendingAsk[] = [];
+const showHeadAsk = () => asks[0] && process.stdout.write(c.yellow(asks[0].question));
+/** Hand a typed line to the oldest waiting prompt. Returns false if none is waiting. */
+function answerAsk(line: string): boolean {
+  const head = asks.shift();
+  if (!head) return false;
+  head.resolve(line);
+  showHeadAsk();
+  return true;
+}
+/** Drop the prompts for an agent question that was answered elsewhere. */
+function cancelAsks(tag: string) {
+  const wasHead = asks[0]?.tag === tag;
+  for (let i = asks.length - 1; i >= 0; i--) if (asks[i].tag === tag) asks.splice(i, 1);
+  if (wasHead) showHeadAsk();
+}
+const ask = (question: string, tag?: string) =>
   new Promise<string>((resolve) => {
     if (!process.stdin.isTTY && argv.includes("-p")) return resolve("n");
-    process.stdout.write(c.yellow(question));
-    pendingAsk = resolve;
+    asks.push({ question, resolve, tag });
+    if (asks.length === 1) showHeadAsk();
   });
 
 const harness = new Harness(cfg, ask);
@@ -105,9 +128,9 @@ function render(e: ChatEvent) {
     case "question-answered":
       if (openQuestion === e.id) {
         openQuestion = null;
-        pendingAsk = null; // answered elsewhere: stop waiting for a line here
+        cancelAsks(e.id); // answered elsewhere: stop waiting for a line here (other prompts stay)
         console.log(c.dim(`(answered${e.answers ? `: ${Object.values(e.answers).join(" · ")}` : ""})`));
-        if (!busy) showPrompt();
+        if (!busy && !asks.length) showPrompt();
       }
       break;
     case "usage":
@@ -168,7 +191,7 @@ async function askQuestions(id: string, questions: AgentQuestion[]) {
     if (openQuestion !== id) return; // answered in the app first
     console.log(`\n${c.bold(c.yellow(`? ${q.header ? `[${q.header}] ` : ""}${q.question}`))}`);
     q.options.forEach((o, i) => console.log(`  ${c.bold(String(i + 1))}. ${o.label}${o.description ? c.dim(` — ${o.description}`) : ""}`));
-    const raw = (await ask(`  ${q.multiSelect ? "Numbers, comma-separated" : "Number"}, or type your own answer: `)).trim();
+    const raw = (await ask(`  ${q.multiSelect ? "Numbers, comma-separated" : "Number"}, or type your own answer: `, id)).trim();
     if (openQuestion !== id) return;
     const nums = raw.split(/[,\s]+/).map(Number).filter((n) => n >= 1 && n <= q.options.length);
     answers[q.question] = nums.length && /^[\d,\s]+$/.test(raw) ? nums.map((n) => q.options[n - 1].label).join(", ") : raw || "(no answer, use your judgment)";
@@ -616,7 +639,7 @@ async function main() {
   }
   const once = flag("-p") ?? flag("--print");
   if (once !== undefined) {
-    rl.on("line", (l) => pendingAsk && (pendingAsk(l), (pendingAsk = null)));
+    rl.on("line", (l) => answerAsk(l));
     await new Promise<void>((resolve) => {
       idleWaiter = resolve;
       engine.send(once, "terminal");
@@ -657,11 +680,7 @@ async function main() {
   console.log(c.dim("Type /help for commands.\n"));
 
   rl.on("line", (line) => {
-    if (pendingAsk) {
-      const r = pendingAsk;
-      pendingAsk = null;
-      return r(line);
-    }
+    if (answerAsk(line)) return;
     void handle(line);
   });
   rl.on("close", () => process.exit(0));

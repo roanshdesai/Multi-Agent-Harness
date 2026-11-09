@@ -168,7 +168,7 @@ export class ChatEngine implements Engine {
   }
 
   get cwd() {
-    return this.opts.cwd ?? process.cwd();
+    return this.opts.cwd ?? this.harness.cwd;
   }
 
   get model() {
@@ -213,12 +213,12 @@ export class ChatEngine implements Engine {
 
   async fork(title?: string): Promise<string> {
     if (!this.sessionId) throw new Error("Nothing to fork yet; send a message first.");
-    const { sessionId } = await forkSession(this.sessionId, { title });
+    const { sessionId } = await forkSession(this.sessionId, { title, dir: this.cwd });
     return sessionId;
   }
 
   async rename(title: string) {
-    if (this.sessionId) await renameSession(this.sessionId, title);
+    if (this.sessionId) await renameSession(this.sessionId, title, { dir: this.cwd });
   }
 
   async listChats(limit = 50): Promise<ChatSummary[]> {
