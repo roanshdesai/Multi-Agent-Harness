@@ -238,6 +238,7 @@ function statsPanel() {
   if (!tokenData) {
     p.appendChild(el("p", "muted", "Reading your Claude Code and Codex history…"));
     void loadTokenStats();
+  api.caffeinate("status").then(showAwake).catch(() => {});
     return p;
   }
   const { perDay, perModel } = statsFor(statsTab);
@@ -997,6 +998,22 @@ function buildModelSelect() {
   sel.append(claude, gpt, more);
   if (curModel) sel.value = curModel;
 }
+
+// ── /caffeinate: keep the computer awake ──────────────────────────────────
+function describeAwake(st) {
+  if (!st.on) return "Caffeinate is off: the computer can sleep as usual.";
+  const what = st.display ? "the computer and screen" : "the computer";
+  if (!st.until) return `Keeping ${what} awake until you run /caffeinate off (closing the lid still sleeps a Mac).`;
+  return `Keeping ${what} awake until ${fmtTime(st.until)}.`;
+}
+function showAwake(st) {
+  const chip = $("awakeChip");
+  chip.hidden = !st.on;
+  chip.textContent = st.on ? (st.until ? `awake · until ${fmtTime(st.until)}` : "awake") : "";
+  document.body.classList.toggle("has-awake", !!st.on);
+}
+$("awakeChip").onclick = async () => showAwake(await api.caffeinate("off"));
+api.onCaffeinate(showAwake);
 
 // ── /remote: control this app from another app (e.g. Pally) over MCP ─────
 async function showRemote() {
@@ -2115,6 +2132,12 @@ async function submit(mode = "send") {
       return showUsage();
     case "/connections":
       return showConnections();
+    case "/caffeinate":
+    case "/caffinate":
+      return api
+        .caffeinate(arg)
+        .then((st) => (showAwake(st), addNote(s, describeAwake(st))))
+        .catch((err) => addNote(s, String(err.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "error"));
     case "/remote":
       return showRemote();
     case "/handoff":

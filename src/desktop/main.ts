@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, session, type WebContents } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, session, powerSaveBlocker, type WebContents } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ import { addServer, removeServer, setDisabled } from "../connections.js";
 import { claudeBin, openCommandInTerminal } from "../terminal.js";
 import { tokenStats } from "../token-stats.js";
 import { RemoteControl } from "../remote.js";
+import { parseCaffeinate, type CaffeinateStatus } from "../caffeinate.js";
 import { claudeMemUrls, startClaudeMem, claudeMemDoctor, startHindsight } from "../memory.js";
 import { listDocs, readDoc, summarizeDoc, cachedSummary } from "../docs.js";
 
@@ -282,6 +283,32 @@ ipcMain.handle("codex-login", async () => {
   if (st.ok) await host.refreshUsage();
   return st;
 });
+// /caffeinate: keep the computer awake (Electron's power-save blocker).
+let caffeine: { id: number; display: boolean; until: number | null; timer?: NodeJS.Timeout } | null = null;
+const caffeineStatus = (): CaffeinateStatus => ({ on: !!caffeine, display: !!caffeine?.display, until: caffeine?.until ?? null });
+function caffeineOff() {
+  if (!caffeine) return;
+  clearTimeout(caffeine.timer);
+  if (powerSaveBlocker.isStarted(caffeine.id)) powerSaveBlocker.stop(caffeine.id);
+  caffeine = null;
+  for (const w of windows.values()) w.webContents.send("caffeinate", caffeineStatus());
+}
+ipcMain.handle("caffeinate", (_e, arg: string) => {
+  const req = parseCaffeinate(arg ?? "");
+  if (req.action === "status") return caffeineStatus();
+  if (req.action === "off" || (req.action === "toggle" && caffeine)) {
+    caffeineOff();
+    return caffeineStatus();
+  }
+  caffeineOff();
+  const id = powerSaveBlocker.start(req.display ? "prevent-display-sleep" : "prevent-app-suspension");
+  caffeine = { id, display: req.display, until: req.durationMs ? Date.now() + req.durationMs : null };
+  if (req.durationMs) caffeine.timer = setTimeout(caffeineOff, req.durationMs);
+  for (const w of windows.values()) w.webContents.send("caffeinate", caffeineStatus());
+  return caffeineStatus();
+});
+app.on("before-quit", caffeineOff);
+
 // /remote: control the app from another app through MCP.
 const remote = new RemoteControl(cfg, host);
 void app.whenReady().then(() => remote.restore());

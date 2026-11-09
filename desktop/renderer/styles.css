@@ -457,3 +457,9 @@ a { color: inherit; text-decoration-color: var(--ink-3); text-underline-offset: 
 .working .spin { border-top-color: var(--signal); }
 .remote-link { display: flex; align-items: center; gap: 10px; border: 1px solid var(--rule); border-radius: 5px; padding: 6px 8px; background: var(--paper); }
 .remote-link code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 11.5px; color: var(--ink); }
+
+/* /caffeinate chip in the title bar */
+.titlebar { position: relative; }
+.awake { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); -webkit-app-region: no-drag; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); background: none; color: var(--amber); font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; border-radius: 3px; padding: 1px 6px; }
+.awake:hover { border-color: var(--amber); }
+body.platform-win.has-awake .titlebar, body.platform-linux.has-awake .titlebar { display: flex; }

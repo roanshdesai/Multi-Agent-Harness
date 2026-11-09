@@ -576,6 +576,19 @@ test("/remote: an MCP client can list tabs, send a task and read the reply; wron
   }
 });
 
+test("/caffeinate: parses toggle, durations, display and off", async () => {
+  const { parseCaffeinate, describeCaffeinate } = await import("../src/caffeinate.js");
+  assert.deepEqual(parseCaffeinate(""), { action: "toggle", durationMs: null, display: false });
+  assert.deepEqual(parseCaffeinate("2h"), { action: "on", durationMs: 7_200_000, display: false });
+  assert.deepEqual(parseCaffeinate("90m display"), { action: "on", durationMs: 5_400_000, display: true });
+  assert.equal(parseCaffeinate("45").durationMs, 2_700_000); // bare number = minutes
+  assert.equal(parseCaffeinate("off").action, "off");
+  assert.throws(() => parseCaffeinate("forever"), /Usage/);
+  assert.match(describeCaffeinate({ on: true, display: false, until: null }), /until you run \/caffeinate off/);
+  assert.match(describeCaffeinate({ on: true, display: true, until: 1000 + 90 * 60_000 }, 1000), /computer and screen awake for 1h 30m/);
+  assert.match(describeCaffeinate({ on: false, display: false, until: null }), /can sleep/);
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

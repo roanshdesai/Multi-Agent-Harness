@@ -18,6 +18,8 @@ import type { TabInfo } from "./host.js";
 import type { AgentQuestion } from "./session.js";
 import { describeUsage, isExhausted, formatReset } from "./usage.js";
 import { readCodexUsage } from "./codex-usage.js";
+import { parseCaffeinate, describeCaffeinate, type CaffeinateStatus } from "./caffeinate.js";
+import { spawn as spawnChild, spawnSync as spawnSyncChild, type ChildProcess } from "node:child_process";
 import { saveCustomServer, removeCustomServer, setDisabled, parseServerSpec } from "./connections.js";
 import { listDocs, summarizeDoc } from "./docs.js";
 import type { ContextInfo } from "./session.js";
@@ -215,6 +217,43 @@ async function continueOnGpt(prompt: string, resetsAt: number | null) {
   engine = gpt;
   console.log(c.yellow(`Claude's usage limit is reached${resetsAt ? ` (resets ${formatReset(resetsAt)})` : ""}. Continuing on ${cfg.models.gpt[0]} with your ChatGPT plan.`));
   gpt.send(prompt, "auto");
+}
+
+// ── /caffeinate: run the system's own keep-awake tool for as long as asked ──
+let awake: { child: ChildProcess; status: CaffeinateStatus; timer?: NodeJS.Timeout } | null = null;
+function awakeOff() {
+  if (!awake) return;
+  clearTimeout(awake.timer);
+  awake.child.kill();
+  awake = null;
+}
+process.on("exit", awakeOff);
+function caffeinate(arg: string): string {
+  const req = parseCaffeinate(arg);
+  if (req.action === "status") return describeCaffeinate(awake?.status ?? { on: false, display: false, until: null });
+  if (req.action === "off" || (req.action === "toggle" && awake)) {
+    awakeOff();
+    return describeCaffeinate({ on: false, display: false, until: null });
+  }
+  awakeOff();
+  const secs = req.durationMs ? String(Math.ceil(req.durationMs / 1000)) : null;
+  let cmd: string, args: string[];
+  if (process.platform === "darwin") {
+    // -i: no idle sleep; -d: screen stays on; -w: stop when this app exits; -t: for that long.
+    cmd = "caffeinate";
+    args = ["-i", ...(req.display ? ["-d"] : []), "-w", String(process.pid), ...(secs ? ["-t", secs] : [])];
+  } else if (process.platform === "linux" && spawnSyncChild("which", ["systemd-inhibit"]).status === 0) {
+    cmd = "systemd-inhibit";
+    args = ["--what", req.display ? "idle:sleep" : "sleep", "--who", "multi-agent-harness", "--why", "/caffeinate", "sleep", secs ?? "infinity"];
+  } else throw new Error("Caffeinate isn't available here (needs macOS, or systemd on Linux). The desktop app supports it everywhere.");
+  const child = spawnChild(cmd, args, { stdio: "ignore" });
+  const status: CaffeinateStatus = { on: true, display: req.display, until: req.durationMs ? Date.now() + req.durationMs : null };
+  awake = { child, status };
+  child.on("exit", () => {
+    if (awake?.child === child) awake = null;
+  });
+  if (req.durationMs) awake.timer = setTimeout(awakeOff, req.durationMs);
+  return describeCaffeinate(status);
 }
 
 // ── local engine (used when the app isn't running) ──────────────────────────
@@ -516,6 +555,15 @@ async function command(line: string): Promise<boolean> {
       harness.verifyEnabled = arg !== "off";
       console.log(`Verifier ${harness.verifyEnabled ? "on" : "off"}.`);
       return true;
+    case "/caffeinate":
+    case "/caffinate": {
+      try {
+        console.log(caffeinate(arg));
+      } catch (err) {
+        console.log(c.red((err as Error).message));
+      }
+      return true;
+    }
     case "/usage": {
       const u = bridge ? await bridge.request("usage") : await harness.refreshUsage();
       console.log(c.bold("Claude plan"));
