@@ -103,8 +103,7 @@
         "AppImage"
       ],
       "category": "Development"
-    },
-    "electronDist": "node_modules/electron/dist"
+    }
   },
   "author": "Agent Harness"
 }
