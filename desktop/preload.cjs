@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("harness", {
   usage: (force) => invoke("usage", force),
   models: () => invoke("models"),
   tokenStats: () => invoke("token-stats"),
+  codexLogin: () => invoke("codex-login"),
   saveModels: (changes) => invoke("models-save", changes),
   connections: (reconnect) => invoke("connections", reconnect),
   mcpToggle: (name, enabled) => invoke("mcp-toggle", name, enabled),

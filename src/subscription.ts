@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AccountInfo } from "@anthropic-ai/claude-agent-sdk";
@@ -46,6 +46,34 @@ export function codexBin(root: string): string {
   if (process.env.HARNESS_CODEX_BIN) return process.env.HARNESS_CODEX_BIN;
   const local = join(root, "node_modules", ".bin", process.platform === "win32" ? "codex.cmd" : "codex");
   return existsSync(local) ? local : "codex";
+}
+
+/**
+ * Sign Codex in to ChatGPT: runs `codex login`, which opens the browser and
+ * waits for the sign-in to finish. Resolves with the new status.
+ */
+export function codexLogin(root: string, timeoutMs = 10 * 60_000): Promise<{ ok: boolean; detail: string }> {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(codexBin(root), ["login"], { env: subscriptionEnv(), stdio: ["ignore", "pipe", "pipe"] });
+    } catch {
+      return resolve(codexStatus(root));
+    }
+    let out = "";
+    child.stdout?.on("data", (d) => (out += d));
+    child.stderr?.on("data", (d) => (out += d));
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    const done = () => {
+      clearTimeout(timer);
+      const st = codexStatus(root);
+      // If the browser didn't open, pass on the sign-in link Codex printed.
+      const url = out.match(/https:\/\/\S+/)?.[0];
+      resolve(st.ok || !url ? st : { ...st, detail: `${st.detail} Sign-in link: ${url}` });
+    };
+    child.on("exit", done);
+    child.on("error", done);
+  });
 }
 
 /** Codex must be logged in with ChatGPT, not an API key. */

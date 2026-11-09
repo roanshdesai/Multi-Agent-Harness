@@ -10,7 +10,7 @@ import { startBridge } from "../bridge.js";
 import { buildAgents, agentRunsOn, customAgentNames } from "../agents.js";
 import { runEvals } from "../eval.js";
 import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "../tools/design-library.js";
-import { codexStatus } from "../subscription.js";
+import { codexStatus, codexLogin } from "../subscription.js";
 import { upsertSubagents, removeSubagent, type CustomSubagent } from "../subagents.js";
 import { addServer, removeServer, setDisabled } from "../connections.js";
 import { claudeBin, openCommandInTerminal } from "../terminal.js";
@@ -261,6 +261,12 @@ ipcMain.handle("usage", async (_e, force?: boolean) => {
 });
 // Models: choose the model for each role and what the pickers offer; saved to harness.config.yaml.
 // Token usage over time from Claude Code and Codex transcripts (home screen stats).
+// Connect Codex to ChatGPT (opens the browser), then report the new status.
+ipcMain.handle("codex-login", async () => {
+  const st = await codexLogin(cfg.root);
+  if (st.ok) await host.refreshUsage();
+  return st;
+});
 ipcMain.handle("token-stats", () => tokenStats(cfg.root));
 ipcMain.handle("models", () => ({ models: cfg.models, available: availableModels, roles: MODEL_ROLES }));
 ipcMain.handle("models-save", (_e, changes: Partial<HarnessConfig["models"]>) => saveModels(cfg, changes));

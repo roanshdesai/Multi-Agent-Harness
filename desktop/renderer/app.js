@@ -856,12 +856,12 @@ function renderStatus() {
     sg.className = `inst${usageState.gptUsage.status === "rejected" ? " bad" : pct >= 80 ? " warn" : ""}`;
     sg.title = `${gw.label}: ${pct}%${gw.resetsAt ? `, resets ${fmtTime(gw.resetsAt)}` : ""}. Click for details.`;
   } else {
-    const gv = el("span", "v", info?.codex?.ok ? "ready" : "sign in");
+    const gv = el("span", "v", info?.codex?.ok ? "ready" : "connect");
     const dotWrap = el("span");
     dotWrap.append(el("span", `dot ${info?.codex?.ok ? "ok" : "warn"}`));
     sg.className = "inst";
     sg.append(el("span", "k", "ChatGPT"), dotWrap, gv);
-    sg.title = info?.codex?.ok ? "Signed in. Usage shows once Codex reports it." : (info?.codex?.detail ?? "");
+    sg.title = info?.codex?.ok ? "Signed in. Usage shows once Codex reports it." : "Click to connect Codex to your ChatGPT plan (opens your browser)";
   }
 }
 function buildModelSelect() {
@@ -996,7 +996,20 @@ $("sbVerify").onclick = () => $("verifyBtn").click();
 $("sbModel").onclick = () => $("modelSelect").focus();
 $("sbContext").onclick = () => showContext();
 $("sbUsage").onclick = () => showUsage();
-$("sbGpt").onclick = () => showUsage();
+$("sbGpt").onclick = () => (info?.codex?.ok ? showUsage() : connectCodex());
+/** Sign Codex in to ChatGPT from the app: opens the browser, then refreshes. */
+async function connectCodex() {
+  const sg = $("sbGpt");
+  sg.querySelector(".v") && (sg.querySelector(".v").textContent = "opening browser…");
+  const st = await api.codexLogin().catch((err) => ({ ok: false, detail: err.message }));
+  info.codex = st;
+  await refreshUsage(true);
+  renderStatus();
+  if (!st.ok) {
+    const s = cur();
+    if (s?.type === "chat") addNote(s, `ChatGPT isn't connected yet: ${st.detail}`, "error");
+  }
+}
 
 // ── sidebar panes ──────────────────────────────────────────────────────────
 const PANES = { chats: "Chats", docs: "Documents", memory: "Memory", connections: "MCP servers & apps", team: "Team" };
@@ -1453,7 +1466,7 @@ async function showUsage() {
 function accountRows() {
   return [
     { name: "Claude plan", ok: !!info?.auth.plan || info?.subscriptionOnly === false, sub: info?.auth.plan ? `Signed in · ${info.auth.plan}` : info?.subscriptionOnly === false ? "API billing allowed" : "Not signed in" },
-    { name: "ChatGPT plan", ok: !!info?.codex.ok, sub: info?.codex.detail ?? "" },
+    { name: "ChatGPT plan", ok: !!info?.codex.ok, sub: info?.codex.detail ?? "", connect: !info?.codex.ok ? connectCodex : null },
     { name: "claude-mem", ok: !!memStatus?.claudeMem.up, sub: memStatus?.claudeMem.up ? memStatus.claudeMem.url : "Not running" },
     { name: "Hindsight", ok: !!memStatus?.hindsight.up, sub: memStatus?.hindsight.up ? memStatus.hindsight.url : "Not running" },
   ];
@@ -1469,6 +1482,18 @@ async function showConnections(focusAdd = false) {
     for (const a of accountRows()) {
       const r = el("div", "list-row");
       r.append(el("span", `dot ${a.ok ? "ok" : "bad"}`), el("div", "name", a.name), el("div", "sub", a.sub));
+      if (a.connect) {
+        const acts = el("div", "acts");
+        const b = el("button", "btn sm primary", "Connect");
+        b.onclick = async () => {
+          b.disabled = true;
+          b.textContent = "Finish in your browser…";
+          await a.connect();
+          render();
+        };
+        acts.appendChild(b);
+        r.appendChild(acts);
+      }
       box.appendChild(r);
     }
     box.appendChild(el("h4", "", `MCP servers (${list.length})`));
