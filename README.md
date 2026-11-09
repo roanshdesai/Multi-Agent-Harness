@@ -6,7 +6,8 @@ A desktop app (Mac, Windows, Linux) and terminal app built on the Claude Agent S
 |---|---|---|
 | Orchestrator | Claude Opus 5.5 | Plans, delegates and combines the results. It doesn't do the work itself. |
 | Advisor | Claude Fable 5.1 | Consulted automatically, like in Claude Code: the working model asks it whenever it hits something hard. Also the backstop after 3 tool failures in a row, and `/advisor` asks it directly. |
-| Coder, designer | Claude Fable 5.1 | All coding and UI work |
+| Coder | Claude Fable 5.1 | All coding work |
+| Designer | Claude Opus 5.5 | UI and visual design |
 | Researcher | Claude Sonnet 5.5 | Scraping, research and general tasks |
 | Summarizer | Claude Sonnet 5.5 | Shortens long pages and logs before the orchestrator reads them |
 | GUI tester | GPT-6 Astra via Codex CLI | Browser testing. Codex drives Playwright on your ChatGPT plan. Falls back to Claude + Playwright MCP if Codex fails or isn't signed in. |
@@ -58,7 +59,7 @@ Its own look, built to read like a document and an instrument:
 
 **Tabs:** every tab is its own task with its own model, so several run at once (⌘T new tab, ⌘W close, ⌘1–9 switch). A tab that's working shows a moving border.
 
-**Claude or GPT per tab:** the model picker at the top lists Opus, Fable and Sonnet (Claude plan) and GPT-6 Astra and GPT-6.1 Sol (ChatGPT plan, through Codex). Switching a tab that already has a conversation to the other family opens a new tab, since they can't share history.
+**Claude or GPT per tab:** the model picker at the top lists the Claude models your plan offers and the GPT models from your settings (ChatGPT plan, through Codex). Change any role's model, or what the picker offers, with `/models` or "Edit models…" at the bottom of the picker. Switching a tab that already has a conversation to the other family opens a new tab, since they can't share history.
 
 **Terminal link:** while the app is open, `npm start` in a terminal joins the same tabs. Messages typed in either show in both; the app marks terminal messages "from terminal". `/tabs`, `/tab <n>` and `/detach` work in the linked terminal. If the app closes, the terminal carries on by itself.
 
