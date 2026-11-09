@@ -24,6 +24,7 @@ export function startBridge(host: Host, onOpenTab: (tabId: string) => void, defa
     if (existsSync(path)) unlinkSync(path); // stale socket from a crash
   }
   const server = createServer((sock: Socket) => {
+    sock.setEncoding("utf8"); // multi-byte characters can be split across chunks
     const write = (o: unknown) => !sock.destroyed && sock.write(JSON.stringify(o) + "\n");
     const off = host.listen((msg) => write(msg));
     let buf = "";
@@ -50,6 +51,7 @@ export function startBridge(host: Host, onOpenTab: (tabId: string) => void, defa
     sock.on("error", () => off());
     write({ type: "tabs", tabs: host.list() });
   });
+  server.on("error", (err) => console.error(`Terminal link unavailable: ${err.message}`));
   server.listen(path, () => {
     if (process.platform !== "win32") chmodSync(path, 0o600);
   });
@@ -131,6 +133,8 @@ export class BridgeClient {
   onClose?: () => void;
 
   constructor(private sock: Socket) {
+    sock.setEncoding("utf8");
+    sock.on("error", () => {}); // 'close' follows; pending requests are rejected there
     let buf = "";
     sock.on("data", (d) => {
       buf += d;
@@ -151,7 +155,11 @@ export class BridgeClient {
         } else for (const h of this.pushHandlers) h(msg);
       }
     });
-    sock.on("close", () => this.onClose?.());
+    sock.on("close", () => {
+      for (const p of this.pending.values()) p.reject(new Error("The app closed."));
+      this.pending.clear();
+      this.onClose?.();
+    });
   }
 
   request<T = any>(op: string, args: Record<string, unknown> = {}): Promise<T> {

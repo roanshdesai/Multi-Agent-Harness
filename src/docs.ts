@@ -1,4 +1,4 @@
-import { readdirSync, statSync, readFileSync, writeFileSync, existsSync, mkdirSync, openSync, readSync, closeSync } from "node:fs";
+import { readdirSync, statSync, readFileSync, writeFileSync, existsSync, mkdirSync, openSync, readSync, closeSync, realpathSync } from "node:fs";
 import { join, relative, extname, basename, resolve, sep } from "node:path";
 import type { HarnessConfig } from "./config.js";
 import type { Harness } from "./session.js";
@@ -93,8 +93,23 @@ export function listDocs(cwd: string, touched: Map<string, "read" | "edited"> = 
 
 /** Only files inside the workspace or the harness folder can be opened. */
 export function safePath(p: string, roots: string[]): string {
-  const abs = resolve(p);
-  if (!roots.some((r) => abs === resolve(r) || abs.startsWith(resolve(r) + sep))) throw new Error("That file is outside the project folder.");
+  let abs: string;
+  try {
+    abs = realpathSync(resolve(p)); // follow symlinks so a link can't point outside the project
+  } catch {
+    throw new Error("That file doesn't exist.");
+  }
+  const inside = roots.some((r) => {
+    let root: string;
+    try {
+      root = realpathSync(resolve(r));
+    } catch {
+      return false;
+    }
+    return abs === root || abs.startsWith(root + sep);
+  });
+  if (!inside) throw new Error("That file is outside the project folder.");
+  if (!DOC_EXT.has(extname(abs).toLowerCase())) throw new Error("Only documents (.md, .txt, .pdf, .docx…) can be opened here.");
   return abs;
 }
 

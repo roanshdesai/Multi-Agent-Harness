@@ -311,7 +311,8 @@ test("docs: finds documents, spots PRDs, refuses paths outside the project", asy
   assert.ok(!isPrd(join(dir, "README.md")));
   assert.equal(readDoc(join(dir, "README.md"), [dir]).text, "# Hello");
   assert.throws(() => safePath("/etc/passwd", [dir]), /outside the project/);
-  assert.throws(() => safePath(join(dir, "..", "escape.md"), [dir]), /outside the project/);
+  assert.throws(() => safePath(join(dir, "..", "escape.md"), [dir]), /outside the project|doesn't exist/);
+  assert.throws(() => safePath(join(dir, "code.ts"), [dir]), /Only documents/); // not a document type
 });
 
 test("/change: steering text is sent into a running turn, otherwise sent normally", async () => {
@@ -332,4 +333,22 @@ test("/change: steering text is sent into a running turn, otherwise sent normall
   (engine as any).runTurn = async (t: string) => (sent = t);
   engine.change("do it this way");
   assert.equal(sent, "do it this way");
+});
+
+test("push guard: chained, multi-line, global-option, --all and gh merges can't slip past", async () => {
+  const { pushTargets } = await import("../src/guards.js");
+  const cwd = process.cwd();
+  assert.deepEqual(pushTargets("git push origin feat && git push origin main", cwd), ["feat", "main"]);
+  assert.deepEqual(pushTargets("echo hi\ngit push origin main", cwd), ["main"]);
+  assert.deepEqual(pushTargets("git -c core.x=1 push origin main", cwd), ["main"]);
+  assert.ok(pushTargets("git push --all origin", cwd)!.includes("main"));
+  assert.deepEqual(pushTargets("git push origin feat:main", cwd), ["main"]);
+  assert.equal(pushTargets("git status && ls", cwd), null);
+  const hook = pushApprovalHook(cfg, async () => "y").hooks[0];
+  const run = async (command: string) =>
+    ((await hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command }, tool_use_id: "t", session_id: "s", transcript_path: "", cwd } as any, "t", { signal })) as any)?.hookSpecificOutput?.permissionDecision ?? "none";
+  assert.equal(await run("git push origin feat && git push origin main"), "deny");
+  assert.equal(await run("gh pr merge 3 --admin"), "deny");
+  assert.equal(await run("gh pr create --fill"), "allow"); // asked, user said y
+  assert.equal(await run("gh pr list"), "none");
 });

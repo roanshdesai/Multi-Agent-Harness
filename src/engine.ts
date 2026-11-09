@@ -10,7 +10,7 @@ import {
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Harness, type TurnResult, type AgentQuestion, type ContextInfo } from "./session.js";
-import type { UsageSnapshot } from "./usage.js";
+import { isExhausted, type UsageSnapshot } from "./usage.js";
 
 /** Everything a UI (terminal or desktop) needs to draw a chat. */
 export type ChatEvent =
@@ -192,11 +192,13 @@ export class ChatEngine implements Engine {
     this.stopped = true;
     this.queue.length = 0;
     for (const id of [...this.questions.keys()]) this.answer(id, {});
-    if (this.current) await this.current.interrupt();
+    // The query may have just finished; interrupting a closed one throws, which is fine.
+    if (this.current) await this.current.interrupt().catch(() => {});
   }
 
   newChat() {
     this.sessionId = undefined;
+    this.lastContext = null;
   }
 
   resume(id: string) {
@@ -317,8 +319,10 @@ export class ChatEngine implements Engine {
       if (h.verifyEnabled && !r.isError && (r.agentsUsed.length > 0 || r.numTurns > 2) && this.sessionId && !prompt.startsWith("/")) {
         for (let round = 1; round <= h.cfg.verify.max_rounds; round++) {
           this.emit({ type: "verify", status: "running", round });
+          if (this.stopped) break;
           this.steer = null; // corrections during verification wait for the next turn
           const v = await h.verify(this.sessionId, { onQuery: hooks.onQuery });
+          this.current = null;
           if (this.stopped) break;
           this.emit({ type: "verify", status: v.pass ? "pass" : "fail", round, feedback: v.feedback });
           if (v.pass) break;
@@ -329,7 +333,8 @@ export class ChatEngine implements Engine {
           );
         }
       }
-      if (r.rateLimited) {
+      this.current = null;
+      if (r.rateLimited && !this.stopped && isExhausted(h.usage)) {
         // Out of Claude usage: the host continues this on GPT if allowed.
         this.queue.length = 0;
         this.emit({ type: "limit", prompt, resetsAt: h.usage?.resetsAt ?? null });

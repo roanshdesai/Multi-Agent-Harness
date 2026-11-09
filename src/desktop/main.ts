@@ -258,7 +258,10 @@ ipcMain.handle("context", (_e, tabId: string) => host.context(tabId));
 // Documents
 const docRoots = () => [process.cwd(), cfg.root];
 ipcMain.handle("docs", () => listDocs(process.cwd(), host.touched));
-ipcMain.handle("doc-read", (_e, path: string) => ({ ...readDoc(path, docRoots()), summary: cachedSummary(cfg, path) }));
+ipcMain.handle("doc-read", (_e, path: string) => {
+  const d = readDoc(path, docRoots());
+  return { ...d, summary: cachedSummary(cfg, d.path) };
+});
 ipcMain.handle("doc-summarize", (_e, path: string, force?: boolean) => summarizeDoc(new Harness(cfg, askFor(0)), path, docRoots(), force));
 ipcMain.handle("doc-open-external", (_e, path: string) => shell.openPath(readDoc(path, docRoots()).path));
 
@@ -296,6 +299,12 @@ ipcMain.handle("eval", async (_e, tabId: string, filter: string) => {
 
 // ── lifecycle ───────────────────────────────────────────────────────────────
 app.setName("Multi-Agent Harness");
+// One app instance owns the terminal link; a second launch just focuses the first.
+if (!app.requestSingleInstanceLock()) app.quit();
+app.on("second-instance", () => {
+  const w = [...windows.values()][0];
+  if (w) (w.isMinimized() && w.restore(), w.focus());
+});
 app.whenReady().then(() => {
   // Let the claude-mem and Hindsight viewers (localhost only) load inside the app.
   session.defaultSession.webRequest.onHeadersReceived({ urls: ["http://localhost/*", "http://127.0.0.1/*"] }, (details, cb) => {

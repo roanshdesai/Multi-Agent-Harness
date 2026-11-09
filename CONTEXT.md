@@ -95,6 +95,26 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 - The Mac `.dmg` and Windows installer. A Linux packaged build was tested.
 - The Hindsight web UI port. 9999 is assumed; claude-mem is checked on 37701, then 37777.
 
+## Open bugs (found in review, not fixed yet)
+
+1. **Changing the workspace while tabs are open.**
+   - `Harness.options` and `ChatEngine.history` read `process.cwd()` each time, so a busy tab's next turn (and history reload) looks in the new folder.
+   - `GptChat.cwd` is fixed when the engine is created, so idle GPT tabs keep the old folder.
+   - Fix: give each tab a fixed cwd passed into Harness and engine options, and recreate GPT engines when the folder changes (`src/desktop/main.ts` pick-workspace, `src/host.ts`).
+2. **Two prompts at once in the terminal** (`src/cli.ts`). `pendingAsk` holds a single resolver, so a push approval and an agent question arriving together overwrite each other. `question-answered` can also clear an approval prompt. Fix: a FIFO of pending asks.
+3. **Race during the switch to GPT** (`src/host.ts` `fallbackToGpt`). The engine is swapped only after awaiting `history()`, so a message sent in that gap goes to Claude again. Fix: swap the engine (or set a switching flag and queue) before awaiting.
+
+Fixed in the last review:
+- push-guard bypasses (chained or multi-line commands, `git -c`, HEAD/@, `--all`/`--mirror`, `gh pr merge`/`create`, `gh api` writes)
+- `-p` exiting before the GPT fallback ran
+- Stop being unreliable and blocking a tab from closing
+- false GPT switches from stale usage data or after Stop
+- UTF-8 text split across chunks (bridge, Codex)
+- bridge crash or takeover on a second app instance (single-instance lock)
+- a linked terminal hanging when the app quits
+- `/context` showing the previous chat after `/new`
+- `safePath` following symlinks and allowing non-document files
+
 ## Known quirks
 
 - When a `/change` arrives while a Bash command is running, Claude Code moves that command to the background. Once, the model misread this as "declined" and stopped early; it didn't happen again.

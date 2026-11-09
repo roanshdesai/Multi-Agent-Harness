@@ -50,6 +50,7 @@ export function runCodex(o: CodexOptions): CodexRun {
     let error: string | undefined;
     let buf = "";
     let stderr = "";
+    child.stdout!.setEncoding("utf8");
     child.stdout!.on("data", (d) => {
       buf += d;
       let nl;

@@ -56,6 +56,7 @@ if (flag("--model") && !isGpt(flag("--model")!)) harness.modelOverride = flag("-
 if (argv.includes("--no-verify")) harness.verifyEnabled = false;
 
 let idleWaiter: (() => void) | null = null;
+let handingOff = false;
 let busy = false;
 
 // ── rendering (same events whether local or linked to the app) ──────────────
@@ -116,11 +117,15 @@ function render(e: ChatEvent) {
       }
       break;
     case "limit":
-      if (!bridge) void continueOnGpt(e.prompt, e.resetsAt);
+      if (!bridge) {
+        handingOff = true; // keep -p alive until GPT finishes
+        void continueOnGpt(e.prompt, e.resetsAt).finally(() => (handingOff = false));
+      }
       break;
     case "busy":
       busy = e.busy;
       if (!e.busy) {
+        if (handingOff) break;
         if (idleWaiter) idleWaiter();
         else showPrompt();
       }

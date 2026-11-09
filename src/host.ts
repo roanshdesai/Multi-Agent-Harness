@@ -184,8 +184,8 @@ export class Host {
   async closeTab(tabId: string) {
     const t = this.tabs.get(tabId);
     if (!t) return;
-    if (t.engine.busy) await t.engine.stop();
-    this.tabs.delete(tabId);
+    this.tabs.delete(tabId); // close even if stopping fails
+    if (t.engine.busy) await t.engine.stop().catch(() => {});
     if (this.activeTab === tabId) this.activeTab = [...this.tabs.keys()].pop() ?? null;
     this.publishTabs();
   }

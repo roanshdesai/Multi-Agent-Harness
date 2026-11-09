@@ -21,7 +21,7 @@ import { pushApprovalHook, stuckDetector, type Ask } from "./guards.js";
 import { assertClaudeSubscription, subscriptionEnv } from "./subscription.js";
 import { HARNESS_COMMANDS, mergeCommands, type CommandInfo } from "./commands.js";
 import { loadCustomServers, loadDisabled, readConnections, type ConnectionInfo } from "./connections.js";
-import { toSnapshot, saveUsage, loadUsage, type UsageSnapshot } from "./usage.js";
+import { toSnapshot, saveUsage, loadUsage, isExhausted, type UsageSnapshot } from "./usage.js";
 
 /** A pushable stream of user messages, so a running task can take corrections (/change). */
 export function inputChannel() {
@@ -284,6 +284,7 @@ export class Harness {
     const input = inputChannel();
     input.push(prompt);
     const q = query({ prompt: input.it, options: this.options(opts) });
+    hooks.onQuery?.(q); // as early as possible, so Stop works from the first moment
     hooks.onSteer?.((text) => input.push(text, "next"));
     for (const name of loadDisabled(this.cfg)) await q.toggleMcpServer(name, false).catch(() => {});
     if (this.cfg.auth.subscription_only && !this.plan) {
@@ -295,7 +296,6 @@ export class Harness {
         throw err;
       }
     }
-    hooks.onQuery?.(q);
     const res: TurnResult = { sessionId: "", text: "", isError: false, numTurns: 0, costUsd: 0, agentsUsed: [] };
     for await (const m of q) {
       if ("session_id" in m && m.session_id) res.sessionId = m.session_id;
@@ -318,7 +318,7 @@ export class Harness {
         res.numTurns = m.num_turns;
         res.costUsd = m.total_cost_usd;
         res.text = m.subtype === "success" ? m.result : `(${m.subtype})`;
-        if (m.is_error && this.usage?.status === "rejected") res.rateLimited = true;
+        if (m.is_error && isExhausted(this.usage)) res.rateLimited = true;
         if (m.subtype === "success") res.structured = m.structured_output;
         hooks.onMessage?.(m);
         // A correction that arrived just as the turn ended starts one more turn; otherwise we're done.
