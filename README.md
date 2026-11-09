@@ -100,6 +100,7 @@ Name a connected app with `@` anywhere in a message, for example `@pally find my
 
 | Command | What it does |
 |---|---|
+| `/remote` | Lets another app (e.g. Pally) control this one through an MCP link: open tabs, send tasks, read replies, answer questions, stop work. Off until you turn it on; a public link needs `brew install cloudflared`. GitHub push approvals stay in the app. |
 | `/handoff` | Writes a `context.md` summary of this chat and offers to continue in a new chat that starts from it. This also happens on its own when a chat's context passes 80% (`context.handoff_at` in `harness.config.yaml`). |
 | `/models` | Pick the model for each role, and which models the model picker offers. Saved to `harness.config.yaml`. |
 | `/fork [title]` | Copies this chat and opens the copy in a **new terminal window** (tmux, macOS Terminal or iTerm, Windows Terminal, or a Linux terminal). `--here` switches to the copy in place instead. |

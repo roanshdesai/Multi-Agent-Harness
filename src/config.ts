@@ -40,6 +40,8 @@ export interface HarnessConfig {
   limits: { fallback_to_gpt: boolean; warn_at: number; refresh_minutes?: number };
   /** handoff_at: share of the context window (0-1) at which a hand-off summary is prepared. 0 turns it off. */
   context?: { handoff_at: number };
+  /** /remote: port of the local MCP server other apps use to control the harness. */
+  remote?: { port: number };
   subagents_file: string;
   root: string;
 }

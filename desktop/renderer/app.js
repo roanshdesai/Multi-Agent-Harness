@@ -998,6 +998,62 @@ function buildModelSelect() {
   if (curModel) sel.value = curModel;
 }
 
+// ── /remote: control this app from another app (e.g. Pally) over MCP ─────
+async function showRemote() {
+  const box = el("div");
+  const render = async (st) => {
+    st ??= await api.remoteStatus();
+    box.textContent = "";
+    box.appendChild(el("p", "muted", "Turn this on to control the app from another app that can add an MCP server, such as Pally: it can open tabs, send tasks, read replies, answer the agent's questions and stop work. GitHub push approvals still only happen here."));
+    const row = el("div", "row-actions");
+    const toggle = el("button", `btn ${st.enabled ? "danger" : "primary"}`, st.enabled ? "Turn off" : "Turn on");
+    toggle.onclick = async () => render(st.enabled ? await api.remoteStop() : await api.remoteStart().catch((err) => ({ ...st, error: err.message })));
+    row.appendChild(toggle);
+    box.appendChild(row);
+    if (st.error) box.appendChild(el("p", "error-text", st.error));
+    if (!st.enabled) return;
+
+    const link = (label, url, note) => {
+      box.appendChild(el("h4", "", label));
+      const r = el("div", "remote-link");
+      const code = el("code", "", url);
+      const copy = el("button", "btn sm", "Copy");
+      copy.onclick = async () => {
+        await navigator.clipboard.writeText(url);
+        copy.textContent = "Copied";
+        setTimeout(() => (copy.textContent = "Copy"), 1500);
+      };
+      r.append(code, copy);
+      box.appendChild(r);
+      if (note) box.appendChild(el("p", "muted", note));
+    };
+    link("On this computer", st.localUrl, "For apps running on this Mac.");
+
+    box.appendChild(el("h4", "", "From the internet (Pally and other cloud apps)"));
+    if (st.publicUrl) link("Public link", st.publicUrl, "Paste this into Pally as an MCP server. Anyone with this link can control the app, so keep it private. The address changes each time the tunnel starts.");
+    else if (st.tunnel === "not-installed") box.appendChild(el("p", "muted", "Cloud apps can't reach this computer directly. Install Cloudflare's free tunnel tool (in Terminal: brew install cloudflared), then come back here to get a public link."));
+    else box.appendChild(el("p", "muted", "Cloud apps can't reach this computer directly. Start a free Cloudflare tunnel to get a public link."));
+    if (st.tunnelError) box.appendChild(el("p", "error-text", st.tunnelError));
+    const tr = el("div", "row-actions");
+    if (st.tunnel !== "not-installed") {
+      const t = el("button", "btn", st.publicUrl ? "Stop public link" : st.tunnel === "starting" ? "Starting…" : "Get a public link");
+      t.onclick = async () => {
+        t.disabled = true;
+        t.textContent = st.publicUrl ? "Stopping…" : "Starting…";
+        render(await api.remoteTunnel(!st.publicUrl));
+      };
+      tr.appendChild(t);
+    }
+    const rot = el("button", "btn danger", "New secret link");
+    rot.title = "Every old link stops working";
+    rot.onclick = async () => render(await api.remoteRotate());
+    tr.appendChild(rot);
+    box.appendChild(tr);
+  };
+  modal("Remote control", box);
+  await render();
+}
+
 // ── /models: pick the model for each role ─────────────────────────────────
 const ROLE_LABELS = {
   main: ["Orchestrator", "Plans and delegates every task"],
@@ -2059,6 +2115,8 @@ async function submit(mode = "send") {
       return showUsage();
     case "/connections":
       return showConnections();
+    case "/remote":
+      return showRemote();
     case "/handoff":
       if (s.info.kind === "gpt") return addNote(s, "Hand-off works on Claude chats. This tab runs on GPT.");
       return api.handoff(s.id).catch((err) => addNote(s, err.message, "error"));

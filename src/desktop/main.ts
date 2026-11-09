@@ -15,6 +15,7 @@ import { upsertSubagents, removeSubagent, type CustomSubagent } from "../subagen
 import { addServer, removeServer, setDisabled } from "../connections.js";
 import { claudeBin, openCommandInTerminal } from "../terminal.js";
 import { tokenStats } from "../token-stats.js";
+import { RemoteControl } from "../remote.js";
 import { claudeMemUrls, startClaudeMem, claudeMemDoctor, startHindsight } from "../memory.js";
 import { listDocs, readDoc, summarizeDoc, cachedSummary } from "../docs.js";
 
@@ -281,6 +282,15 @@ ipcMain.handle("codex-login", async () => {
   if (st.ok) await host.refreshUsage();
   return st;
 });
+// /remote: control the app from another app through MCP.
+const remote = new RemoteControl(cfg, host);
+void app.whenReady().then(() => remote.restore());
+app.on("before-quit", () => remote.stopTunnel());
+ipcMain.handle("remote-status", () => remote.status());
+ipcMain.handle("remote-start", () => remote.start());
+ipcMain.handle("remote-stop", () => remote.stop());
+ipcMain.handle("remote-rotate", () => remote.rotate());
+ipcMain.handle("remote-tunnel", (_e, on: boolean) => (on ? remote.startTunnel() : remote.stopTunnel()));
 ipcMain.handle("handoff", (_e, tabId: string) => host.handoff(tabId));
 ipcMain.handle("handoff-continue", (_e, tabId: string, file: string) => host.continueInNewChat(tabId, file));
 ipcMain.handle("token-stats", () => tokenStats(cfg.root));

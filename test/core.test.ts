@@ -535,6 +535,47 @@ test("context hand-off: past the threshold a context.md is written once, and a n
   assert.equal(prompts.length, 1);
 });
 
+test("/remote: an MCP client can list tabs, send a task and read the reply; wrong links are refused", async () => {
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const { loadConfig } = await import("../src/config.js");
+  const { Host } = await import("../src/host.js");
+  const { RemoteControl } = await import("../src/remote.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  cfg.remote = { port: 0 }; // any free port
+  const host = new Host(cfg, () => async () => "n");
+  const gptTab = host.createTab({ windowId: 1, model: cfg.models.gpt[0] });
+  const rc = new RemoteControl(cfg, host);
+  const st = await rc.start();
+  try {
+    const url = st.localUrl!;
+    const call = async (u: string, body: object) => {
+      const r = await fetch(u, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify(body) });
+      return { status: r.status, json: r.status === 200 ? await r.json() : null };
+    };
+    assert.equal((await call(url.replace(/[^/]+$/, "wrong-token-xxxxxxxxxxxxxxxxxxxxxxxx"), { jsonrpc: "2.0", id: 1, method: "initialize", params: {} })).status, 404);
+    const init = await call(url, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+    assert.equal(init.json.result.serverInfo.name, "multi-agent-harness");
+    assert.equal((await call(url, { jsonrpc: "2.0", method: "notifications/initialized" })).status, 202);
+    const tools = await call(url, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+    assert.deepEqual(tools.json.result.tools.map((t: any) => t.name), ["list_tabs", "send_message", "get_reply", "read_chat", "answer_question", "stop", "usage"]);
+    const tool = async (name: string, args: object = {}) => (await call(url, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name, arguments: args } })).json.result;
+    assert.match((await tool("list_tabs")).content[0].text, new RegExp(gptTab.id));
+    assert.match((await tool("send_message", { text: "hello from pally", tab_id: gptTab.id })).content[0].text, /Sent to tab/);
+    const reply = await tool("get_reply", { tab_id: gptTab.id, wait_seconds: 10 });
+    assert.match(reply.content[0].text, /hello from pally/);
+    assert.match((await tool("read_chat", { tab_id: gptTab.id })).content[0].text, /user: hello from pally/);
+    assert.equal((await tool("answer_question", { tab_id: gptTab.id, answer: "x" })).isError, true); // nothing waiting
+    const old = url;
+    const rotated = rc.rotate();
+    assert.notEqual(rotated.localUrl, old);
+    assert.equal((await call(old, { jsonrpc: "2.0", id: 9, method: "ping" })).status, 404);
+  } finally {
+    await rc.stop();
+    delete process.env.HARNESS_CODEX_BIN;
+  }
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

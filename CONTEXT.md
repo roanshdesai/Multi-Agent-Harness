@@ -42,6 +42,7 @@ src/engine.ts        ChatEngine (one Claude chat): turns, queue, verifier loop, 
                      /change, questions, history (hides internal notices); the Engine interface
 src/gpt-chat.ts      GptChat: the same Engine interface over Codex; transcripts in .harness/gpt-chats
 src/codex.ts         runCodex(): `codex exec --json`, parses thread/item/turn events
+src/remote.ts        /remote: MCP server (Streamable HTTP, JSON replies) on 127.0.0.1:remote.port, secret in the URL, optional cloudflared quick tunnel; tools list_tabs/send_message/get_reply/read_chat/answer_question/stop/usage
 src/memory.ts        Start claude-mem (`npx claude-mem start`, doctor) and Hindsight (`docker compose up -d hindsight`) from the app; claude-mem port from ~/.claude-mem/settings.json
 src/token-stats.ts   Token usage over time for the home screen: Claude Code + Codex transcripts, cached per file
 src/codex-usage.ts   ChatGPT plan usage: `codex app-server`, initialize, then account/rateLimits/read
@@ -77,13 +78,13 @@ Key SDK facts this project relies on (Agent SDK v0.3.x):
 
 ## Features (all shipped)
 
-Live "working…" line under the thread (Thinking / Running <cmd> / <agent> is working / Verifying…, with a timer) · Context hand-off (past `context.handoff_at`, default 80%, a chat writes `.harness/handoffs/<session>/context.md` on a throwaway fork and offers "Continue in a new chat", which seeds a new tab with it; `/handoff` any time; Claude chats only) · Home-screen token usage (All / Claude / ChatGPT tabs: totals, streaks, top model, year calendar grid, book comparison) · Tabs (parallel tasks) · `@app` mentions (type @ in the composer to name a connected MCP server, e.g. @pally, @slack; the model is told to use that server's `mcp__<name>__*` tools and may call them itself) · live terminal link · `/btw` · `/fork` (new window, or a new terminal window from the CLI) · `/change` (⌘Enter) · verifier · automatic advisor · `/subagents` (advisor designs, you approve) · Claude/GPT model picker per tab · image agent · `/usage` + automatic switch to GPT when Claude is out · agent questions (answer in app or terminal) · MCP servers & apps panel (`/connections`, `/mcp`, `/apps`) · Documents pane with PRD summaries (`/docs`, `/summarize`) · `/context` grid · memory viewers (claude-mem, Hindsight) · UI links library · evals · original UI (dark graphite palette with one signal accent, sans + mono type, dense layout, log-style agent timeline, instrument panel) · add MCP servers from the app (URLs go into Claude Code's user list so sign-in works; Sign in opens `claude /mcp` in a terminal) · chats from every folder, opened in their own folder; Cloud sessions link to claude.ai/code.
+`/remote` (control the app from Pally or any MCP client; off by default, push approvals stay local) · Live "working…" line under the thread (Thinking / Running <cmd> / <agent> is working / Verifying…, with a timer) · Context hand-off (past `context.handoff_at`, default 80%, a chat writes `.harness/handoffs/<session>/context.md` on a throwaway fork and offers "Continue in a new chat", which seeds a new tab with it; `/handoff` any time; Claude chats only) · Home-screen token usage (All / Claude / ChatGPT tabs: totals, streaks, top model, year calendar grid, book comparison) · Tabs (parallel tasks) · `@app` mentions (type @ in the composer to name a connected MCP server, e.g. @pally, @slack; the model is told to use that server's `mcp__<name>__*` tools and may call them itself) · live terminal link · `/btw` · `/fork` (new window, or a new terminal window from the CLI) · `/change` (⌘Enter) · verifier · automatic advisor · `/subagents` (advisor designs, you approve) · Claude/GPT model picker per tab · image agent · `/usage` + automatic switch to GPT when Claude is out · agent questions (answer in app or terminal) · MCP servers & apps panel (`/connections`, `/mcp`, `/apps`) · Documents pane with PRD summaries (`/docs`, `/summarize`) · `/context` grid · memory viewers (claude-mem, Hindsight) · UI links library · evals · original UI (dark graphite palette with one signal accent, sans + mono type, dense layout, log-style agent timeline, instrument panel) · add MCP servers from the app (URLs go into Claude Code's user list so sign-in works; Sign in opens `claude /mcp` in a terminal) · chats from every folder, opened in their own folder; Cloud sessions link to claude.ai/code.
 
 ## How to test
 
 ```bash
 npm install
-npx tsc --noEmit && npm test          # 28 unit tests
+npx tsc --noEmit && npm test          # 29 unit tests
 HARNESS_ALLOW_API=1 npm start         # only in containers without a subscription
 ```
 
@@ -102,6 +103,7 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 - The Mac `.dmg` and Windows installer. A Linux packaged build was tested.
 - Pally sign-in through the app's Sign in button (`claude /mcp`). The container can't reach agent.pally.com.
 - Listing cloud (claude.ai/code) sessions inside the app: the SDK has no API for it, so the Chats pane links out.
+- /remote from Pally: depends on Pally accepting a custom MCP server URL (pally.com wasn't reachable from the container) and on cloudflared being installed for the public link.
 - Starting claude-mem with `npx claude-mem start` (the command is from its README; its docs site wasn't reachable from the container) and Hindsight via Docker on a Mac.
 - The Hindsight web UI port. 9999 is assumed; claude-mem is checked on 37701, then 37777.
 

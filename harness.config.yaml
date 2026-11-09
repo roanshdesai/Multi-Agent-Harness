@@ -43,6 +43,12 @@ limits:
   warn_at: 0.8   # show a heads-up when a usage window passes 80%
   refresh_minutes: 5   # re-read plan usage this often (0 = only at start and when you open Usage)
 
+remote:
+  # /remote: an MCP server other apps (e.g. Pally) use to control this app.
+  # Off until you turn it on in the app; only reachable on this computer
+  # unless you also start the public tunnel. Fixed port so the link stays the same.
+  port: 47615
+
 context:
   # When a chat's context window passes this share, write a hand-off summary
   # (context.md) and offer to continue in a new chat that starts from it.
