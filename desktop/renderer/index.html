@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'none'"
+    />
+    <title>Agent Harness</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <aside class="sidebar">
+        <div class="drag-region"></div>
+        <div class="brand">
+          <div class="logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" /><circle cx="4.5" cy="6" r="1.8" /><circle cx="19.5" cy="6" r="1.8" /><circle cx="12" cy="20.5" r="1.8" /><path d="M5.9 7.1L9.5 10M18.1 7.1L14.5 10M12 15.2v3.5" /></svg>
+          </div>
+          <span>Agent Harness</span>
+        </div>
+        <button class="new-chat" id="newChat" title="New chat (⌘N)">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>New chat
+        </button>
+        <input class="chat-search" id="chatSearch" placeholder="Search chats" />
+        <nav class="chat-list" id="chatList" aria-label="Chats"></nav>
+        <div class="sidebar-foot">
+          <button class="workspace" id="workspaceBtn" title="Folder the agents work in">
+            <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+            <span id="workspaceName">…</span>
+          </button>
+          <div class="plans" id="plans"></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="title-wrap">
+            <h1 id="chatTitle" title="Double-click to rename">New chat</h1>
+          </div>
+          <div class="top-actions">
+            <label class="pill" title="Main model">
+              <select id="modelSelect"></select>
+            </label>
+            <button class="pill toggle" id="verifyBtn" title="Fable verifier checks delegated work">Verifier</button>
+            <button class="ghost" id="btwBtn" title="Side question (/btw)">btw</button>
+            <button class="ghost" id="forkBtn" title="Fork into a new window (/fork)">
+              <svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7M12 12v5" /></svg>Fork
+            </button>
+          </div>
+        </header>
+
+        <section class="thread" id="thread" aria-live="polite">
+          <div class="empty" id="empty">
+            <h2>What should the team work on?</h2>
+            <p>Opus plans and delegates. Fable codes and advises, Sonnet researches, GPT-6 Astra tests the UI.</p>
+            <div class="suggestions" id="suggestions"></div>
+          </div>
+        </section>
+
+        <footer class="composer-wrap">
+          <div class="slash-menu" id="slashMenu" role="listbox" hidden></div>
+          <div class="composer">
+            <textarea id="input" rows="1" placeholder="Message the team. Type / for commands" autofocus></textarea>
+            <button class="send" id="sendBtn" title="Send (Enter)" aria-label="Send">
+              <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+            </button>
+            <button class="stop" id="stopBtn" title="Stop" aria-label="Stop" hidden>
+              <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+            </button>
+          </div>
+          <div class="hint" id="hint">Enter to send · Shift+Enter for a new line · only GitHub pushes ask for approval</div>
+        </footer>
+      </main>
+
+      <aside class="btw-panel" id="btwPanel" hidden>
+        <div class="btw-head">
+          <strong>By the way</strong>
+          <span>Side questions don't touch the chat</span>
+          <button class="icon" id="btwClose" aria-label="Close">×</button>
+        </div>
+        <div class="btw-list" id="btwList"></div>
+        <form class="btw-form" id="btwForm">
+          <input id="btwInput" placeholder="Ask a quick side question…" />
+        </form>
+      </aside>
+    </div>
+
+    <div class="modal" id="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-head"><h3 id="modalTitle"></h3><button class="icon" id="modalClose" aria-label="Close">×</button></div>
+        <div class="modal-body" id="modalBody"></div>
+      </div>
+    </div>
+
+    <div class="blocker" id="blocker" hidden>
+      <div class="blocker-card">
+        <h2>Sign in with your subscription</h2>
+        <p id="blockerMsg"></p>
+        <ol>
+          <li>Open Claude Code in a terminal: <code>claude</code></li>
+          <li>Run <code>/login</code> and choose your Claude Pro or Max account</li>
+          <li>Come back and press Retry</li>
+        </ol>
+        <button class="primary" id="retryAuth">Retry</button>
+      </div>
+    </div>
+
+    <script src="../../node_modules/marked/lib/marked.umd.js"></script>
+    <script src="../../node_modules/dompurify/dist/purify.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

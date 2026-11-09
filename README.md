@@ -1,6 +1,6 @@
 # Agent harness
 
-A standalone terminal app built on the Claude Agent SDK. You chat with one orchestrator, which hands work to specialists on different models.
+A desktop app (Mac, Windows, Linux) and terminal app built on the Claude Agent SDK. You chat with one orchestrator, which hands work to specialists on different models.
 
 | Role | Model | Used for |
 |---|---|---|
@@ -39,6 +39,28 @@ npm start
 
 Each MCP server is only loaded once its keys are in `.env`. `/status` shows which servers are missing keys.
 
+## Desktop app
+
+```bash
+npm run desktop           # run it from this folder
+npm run desktop:mac       # build Agent Harness.dmg into release/
+npm run desktop:win       # build the Windows installer into release/
+```
+
+Build the installer on the platform you'll use it on, since each one bundles that platform's Claude and Codex programs.
+
+- **Chats:** listed in the sidebar, grouped by date. Search with ⌘K. Double-click the title to rename a chat.
+- **Agent cards:** each handoff shows up as a card with the agent and its model. Click a card to see its steps.
+- **Verifier:** a "Verified" badge appears when Fable checks the work. If it finds problems, click the badge to see them.
+- **Fork:** opens the copied chat in its own window.
+- **btw:** answers side questions in a side panel, even while a turn is running.
+- **Folder:** the folder at the bottom of the sidebar is where agents work. Click it to switch projects. Each folder has its own chats.
+- **GitHub approval:** shown as a native Approve/Deny dialog.
+- **Sign-in:** if Claude isn't signed in with a subscription, the app shows a sign-in screen instead of running.
+- **First launch:** the installed app keeps its settings, UI links and evals in `~/.agent-harness`.
+
+The terminal version (`npm start`) runs on the same engine and has the same commands.
+
 ## Commands
 
 | Command | What it does |
@@ -74,7 +96,11 @@ Results are saved to `evals/results/`. Re-run the evals after you change a model
 ## Layout
 
 ```
-src/cli.ts              REPL, slash commands, verifier loop
+src/engine.ts           chat engine shared by both apps: turns, verifier loop, /btw, /fork
+src/cli.ts              terminal app
+src/desktop/main.ts     desktop app (Electron main process)
+desktop/renderer/       desktop window UI
+desktop/preload.cjs     bridge between the window and the engine
 src/session.ts          SDK options: models, agents, MCP, plugins, hooks, sandbox
 src/agents.ts           subagent definitions (model per role)
 src/guards.ts           push approval and stuck detection

@@ -9,7 +9,11 @@
     "typecheck": "tsc --noEmit",
     "eval": "tsx src/cli.ts eval",
     "setup": "bash scripts/setup.sh",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "desktop": "tsc && electron .",
+    "desktop:dist": "tsc && electron-builder",
+    "desktop:mac": "tsc && electron-builder --mac",
+    "desktop:win": "tsc && electron-builder --win"
   },
   "repository": {
     "type": "git",
@@ -22,11 +26,15 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.319",
     "@openai/codex": "^0.167.0",
+    "dompurify": "^3.4.17",
+    "marked": "^18.1.3",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
@@ -34,5 +42,69 @@
   "private": true,
   "bin": {
     "harness": "dist/cli.js"
-  }
+  },
+  "main": "dist/desktop/main.js",
+  "productName": "Agent Harness",
+  "build": {
+    "appId": "dev.agentharness.app",
+    "productName": "Agent Harness",
+    "directories": {
+      "output": "release",
+      "buildResources": "desktop/build"
+    },
+    "files": [
+      "dist/**",
+      "desktop/preload.cjs",
+      "desktop/renderer/**",
+      "package.json",
+      "node_modules/**",
+      "!node_modules/electron/**",
+      "!node_modules/electron-builder/**"
+    ],
+    "extraResources": [
+      {
+        "from": "harness.config.yaml",
+        "to": "seed/harness.config.yaml"
+      },
+      {
+        "from": ".env.example",
+        "to": "seed/.env.example"
+      },
+      {
+        "from": "design-library",
+        "to": "seed/design-library"
+      },
+      {
+        "from": "evals/tasks",
+        "to": "seed/evals/tasks"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/claude-agent-sdk-*/**",
+      "node_modules/@openai/codex-*/**"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development"
+    },
+    "electronDist": "node_modules/electron/dist"
+  },
+  "author": "Agent Harness"
 }

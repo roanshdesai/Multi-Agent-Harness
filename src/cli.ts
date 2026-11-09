@@ -1,17 +1,10 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import {
-  forkSession,
-  listSessions,
-  renameSession,
-  type Options,
-  type Query,
-  type SDKMessage,
-} from "@anthropic-ai/claude-agent-sdk";
 import { loadConfig } from "./config.js";
-import { Harness, type TurnResult } from "./session.js";
+import { Harness } from "./session.js";
+import { ChatEngine, expandShortcut, type ChatEvent } from "./engine.js";
 import { buildAgents } from "./agents.js";
 import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "./tools/design-library.js";
 import { openInNewTerminal, resumeCommand } from "./terminal.js";
@@ -35,10 +28,9 @@ const flag = (name: string) => {
 };
 
 const cfg = loadConfig();
-const stateFile = join(cfg.root, ".harness", "last-session");
 mkdirSync(join(cfg.root, ".harness"), { recursive: true });
 
-// ── input plumbing: one readline shared by the prompt, approvals and /btw ───
+// ── input plumbing: one readline shared by the prompt and approvals ─────────
 const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY });
 let pendingAsk: ((answer: string) => void) | null = null;
 const ask = (question: string) =>
@@ -52,96 +44,51 @@ const harness = new Harness(cfg, ask);
 if (flag("--model")) harness.modelOverride = flag("--model");
 if (argv.includes("--no-verify")) harness.verifyEnabled = false;
 
-let sessionId: string | undefined = flag("--resume");
-if (argv.includes("--continue") && existsSync(stateFile)) sessionId = readFileSync(stateFile, "utf8").trim();
-let busy = false;
-let current: Query | null = null;
-const queue: string[] = [];
+let idleWaiter: (() => void) | null = null;
 
-// ── rendering ───────────────────────────────────────────────────────────────
-function summarizeInput(input: any): string {
-  const v = input?.command ?? input?.file_path ?? input?.pattern ?? input?.url ?? input?.query ?? input?.description ?? input?.prompt ?? "";
-  return String(v).replace(/\s+/g, " ").slice(0, 100);
-}
-
-function render(prefix = "") {
-  return (m: SDKMessage) => {
-    if (m.type === "system" && m.subtype === "init" && !prefix) {
-      sessionId = m.session_id;
-    }
-    if (m.type !== "assistant") return;
-    const sub = m.parent_tool_use_id !== null;
-    for (const b of m.message.content) {
-      if (b.type === "text" && !sub && b.text.trim()) {
-        console.log(`${prefix}${b.text}\n`);
-      } else if (b.type === "tool_use") {
-        const input = b.input as any;
-        const label =
-          b.name === "Agent" || b.name === "Task"
-            ? c.cyan(`⇢ ${input?.subagent_type ?? "agent"}: ${String(input?.description ?? "").slice(0, 80)}`)
-            : c.dim(`${sub ? "   ↳ " : "⏺ "}${b.name}(${summarizeInput(input)})`);
-        console.log(prefix + label);
+function render(e: ChatEvent) {
+  switch (e.type) {
+    case "text":
+      console.log(`${e.text}\n`);
+      break;
+    case "agent":
+      console.log(c.cyan(`⇢ ${e.agent}: ${e.description.slice(0, 80)}`));
+      break;
+    case "tool":
+      console.log(c.dim(`${e.sub ? "   ↳ " : "⏺ "}${e.name}(${e.summary.slice(0, 100)})`));
+      break;
+    case "verify":
+      if (e.status === "running") console.log(c.dim(`… verifier (${cfg.models.verifier}) checking, round ${e.round}`));
+      else if (e.status === "pass") console.log(c.green("✔ verifier: PASS\n"));
+      else console.log(c.red("✘ verifier: FAIL\n") + c.dim((e.feedback ?? "").slice(0, 1500)) + "\n");
+      break;
+    case "queued":
+      console.log(c.dim("(queued; runs after the current turn. Use /btw for a side question)"));
+      break;
+    case "turn-end":
+      if (e.isError) console.log(c.red(`(turn ended with an error: ${e.error})`));
+      console.log(
+        c.dim(
+          `[${e.numTurns} turns${cfg.auth.subscription_only ? "" : ` · ~$${e.costUsd.toFixed(2)} API`}${e.agents.length ? ` · agents: ${e.agents.join(", ")}` : ""}]`,
+        ),
+      );
+      break;
+    case "error":
+      console.log(c.red(`Error: ${e.message}`));
+      break;
+    case "busy":
+      if (!e.busy) {
+        if (idleWaiter) idleWaiter();
+        else showPrompt();
       }
-    }
-  };
-}
-
-// ── main turn with verifier loop ────────────────────────────────────────────
-async function runMain(prompt: string) {
-  busy = true;
-  try {
-    const opts: Partial<Options> = sessionId ? { resume: sessionId } : {};
-    let r: TurnResult = await harness.run(prompt, opts, { onMessage: render(), onQuery: (q) => (current = q) });
-    sessionId = r.sessionId || sessionId;
-
-    // Verify substantive work (anything that used tools).
-    if (harness.verifyEnabled && !r.isError && (r.agentsUsed.length > 0 || r.numTurns > 2) && sessionId && !prompt.startsWith("/")) {
-      for (let round = 1; round <= cfg.verify.max_rounds; round++) {
-        console.log(c.dim(`… verifier (${cfg.models.verifier}) checking, round ${round}`));
-        const v = await harness.verify(sessionId);
-        if (v.pass) {
-          console.log(c.green("✔ verifier: PASS\n"));
-          break;
-        }
-        console.log(c.red("✘ verifier: FAIL\n") + c.dim(v.feedback.slice(0, 1500)) + "\n");
-        r = await harness.run(
-          `An independent verifier reviewed your last answer and found problems:\n\n${v.feedback}\n\nFix them (delegate as usual), then give the corrected final answer.`,
-          { resume: sessionId },
-          { onMessage: render(), onQuery: (q) => (current = q) },
-        );
-      }
-    }
-    if (r.isError) console.log(c.red(`(turn ended with an error: ${r.text})`));
-    console.log(c.dim(`[${r.numTurns} turns${cfg.auth.subscription_only ? "" : ` · ~$${r.costUsd.toFixed(2)} API`}${r.agentsUsed.length ? ` · agents: ${[...new Set(r.agentsUsed)].join(", ")}` : ""}]`));
-  } catch (err) {
-    console.log(c.red(`Error: ${(err as Error).message}`));
-  } finally {
-    if (sessionId) writeFileSync(stateFile, sessionId);
-    current = null;
-    busy = false;
-    const next = queue.shift();
-    if (next) void handle(next);
-    else showPrompt();
+      break;
   }
 }
 
-/** /btw — side question on a throwaway fork; can run while a turn is in progress. */
-async function btw(question: string) {
-  const opts: Partial<Options> = {
-    persistSession: false,
-    maxTurns: 6,
-    disallowedTools: ["Write", "Edit", "NotebookEdit", "Bash", "Agent", "mcp__github__*", "mcp__slack__*", "mcp__outlook__*"],
-    ...(sessionId ? { resume: sessionId, forkSession: true } : {}),
-  };
-  const r = await harness.run(
-    `(Side question from the user. Answer briefly from what you already know; do not start or change any work.)\n\n${question}`,
-    opts,
-  );
-  console.log(c.cyan("\n┌─ btw ─────────────────────────────"));
-  console.log(r.text.split("\n").map((l) => c.cyan("│ ") + l).join("\n"));
-  console.log(c.cyan("└───────────────────────────────────\n"));
-  if (!busy) showPrompt();
-}
+const chat = new ChatEngine(harness, render);
+const resumeFlag = flag("--resume");
+if (resumeFlag) chat.sessionId = resumeFlag;
+if (argv.includes("--continue")) chat.sessionId = chat.lastSession();
 
 // ── slash commands ──────────────────────────────────────────────────────────
 const HELP = `
@@ -165,7 +112,12 @@ Any other /command (e.g. superpowers or gstack skills like /review, /qa, /ship) 
 async function command(line: string): Promise<boolean> {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   const arg = rest.join(" ");
-  const delegate = (text: string) => (busy ? queue.push(text) : void runMain(text));
+
+  const shortcut = expandShortcut(cmd, arg);
+  if (shortcut) {
+    chat.send(shortcut);
+    return true;
+  }
 
   switch (cmd) {
     case "/help":
@@ -176,27 +128,35 @@ async function command(line: string): Promise<boolean> {
       process.exit(0);
     case "/new":
     case "/clear":
-      sessionId = undefined;
+      chat.newChat();
       console.log(c.dim("Started a new chat."));
       return true;
     case "/btw":
       if (!arg) console.log("Usage: /btw <question>");
-      else void btw(arg);
+      else
+        void chat.btw(arg).then((answer) => {
+          console.log(c.cyan("\n┌─ btw ─────────────────────────────"));
+          console.log(answer.split("\n").map((l) => c.cyan("│ ") + l).join("\n"));
+          console.log(c.cyan("└───────────────────────────────────\n"));
+          if (!chat.busy) showPrompt();
+        });
       return true;
     case "/stop":
-      if (current) await current.interrupt();
+      if (chat.busy) await chat.stop();
       else console.log(c.dim("Nothing running."));
       return true;
     case "/fork": {
-      if (!sessionId) {
-        console.log(c.dim("Nothing to fork yet; send a message first."));
-        return true;
-      }
       const here = rest.includes("--here");
       const title = rest.filter((r) => r !== "--here").join(" ") || undefined;
-      const { sessionId: forkId } = await forkSession(sessionId, { title });
+      let forkId: string;
+      try {
+        forkId = await chat.fork(title);
+      } catch (err) {
+        console.log(c.dim((err as Error).message));
+        return true;
+      }
       if (here) {
-        sessionId = forkId;
+        chat.resume(forkId);
         console.log(c.green(`Switched to fork ${forkId}`));
         return true;
       }
@@ -210,26 +170,28 @@ async function command(line: string): Promise<boolean> {
       return true;
     }
     case "/chats": {
-      const list = await listSessions({ dir: process.cwd(), limit: 20 });
+      const list = await chat.listChats(20);
       list.forEach((s, i) =>
         console.log(
-          `${String(i + 1).padStart(2)}. ${s.sessionId === sessionId ? c.green("●") : " "} ${s.customTitle ?? s.summary}`.slice(0, 110) +
-            c.dim(`  ${new Date(s.lastModified).toLocaleString()}  ${s.sessionId}`),
+          `${String(i + 1).padStart(2)}. ${s.id === chat.sessionId ? c.green("●") : " "} ${s.title}`.slice(0, 110) +
+            c.dim(`  ${new Date(s.updated).toLocaleString()}  ${s.id}`),
         ),
       );
       return true;
     }
     case "/resume": {
-      if (/^\d+$/.test(arg)) {
-        const list = await listSessions({ dir: process.cwd(), limit: 50 });
-        sessionId = list[Number(arg) - 1]?.sessionId;
-      } else sessionId = arg || (existsSync(stateFile) ? readFileSync(stateFile, "utf8").trim() : undefined);
-      console.log(sessionId ? c.green(`Resumed ${sessionId}`) : c.red("No such chat."));
+      let id: string | undefined;
+      if (/^\d+$/.test(arg)) id = (await chat.listChats(50))[Number(arg) - 1]?.id;
+      else id = arg || chat.lastSession();
+      if (id) {
+        chat.resume(id);
+        console.log(c.green(`Resumed ${id}`));
+      } else console.log(c.red("No such chat."));
       return true;
     }
     case "/rename":
-      if (sessionId && arg) {
-        await renameSession(sessionId, arg);
+      if (chat.sessionId && arg) {
+        await chat.rename(arg);
         console.log(c.dim(`Renamed to "${arg}".`));
       }
       return true;
@@ -244,12 +206,12 @@ async function command(line: string): Promise<boolean> {
     case "/status":
       console.log(
         [
-          `chat:      ${sessionId ?? "(new)"}`,
+          `chat:      ${chat.sessionId ?? "(new)"}`,
           `billing:   ${cfg.auth.subscription_only ? `subscription only · Claude plan: ${harness.plan ?? "?"} · Codex: ${codexStatus(cfg.root).detail}` : "API keys allowed (HARNESS_ALLOW_API=1)"}`,
           `models:    ${Object.entries(cfg.models).map(([k, v]) => `${k}=${v}`).join("  ")}`,
           `main now:  ${harness.mainModel}`,
           `verifier:  ${harness.verifyEnabled ? "on" : "off"}`,
-          `plugins:   ${harness.plugins.map((p) => p.path.split("/").pop()).join(", ") || "(none — run scripts/setup.sh)"}`,
+          `plugins:   ${harness.plugins.map((p) => p.path.split("/").pop()).join(", ") || "(none; run scripts/setup.sh)"}`,
           `mcp off:   ${harness.mcpSkipped.join("; ") || "(all enabled servers configured)"}`,
           `design:    ${loadDesignLinks(cfg.design_library).length} links in ${cfg.design_library}`,
         ].join("\n"),
@@ -270,27 +232,6 @@ async function command(line: string): Promise<boolean> {
     case "/eval":
       await runEvals(harness, arg);
       return true;
-    case "/advisor":
-      delegate(`Consult the "advisor" agent on this and report its recommendation: ${arg}`);
-      return true;
-    case "/code":
-      delegate(`Delegate this coding task to the "coder" agent, verify it, and report back: ${arg}`);
-      return true;
-    case "/research":
-      delegate(`Use "researcher" agents (in parallel if it splits) to research: ${arg}`);
-      return true;
-    case "/test":
-      delegate(`Have the "gui-tester" agent test this: ${arg}`);
-      return true;
-    case "/video":
-      delegate(`Delegate to the "video" agent: ${arg}`);
-      return true;
-    case "/remember":
-      delegate(`Store this in long-term memory (Hindsight retain), confirm briefly: ${arg}`);
-      return true;
-    case "/recall":
-      delegate(`Search long-term memory (Hindsight recall/reflect, and claude-mem if available) for: ${arg}`);
-      return true;
     default:
       return false; // unknown → pass through to the agent (plugin/skill commands)
   }
@@ -300,19 +241,14 @@ async function handle(line: string) {
   const text = line.trim();
   if (!text) return showPrompt();
   if (text.startsWith("/") && (await command(text))) {
-    if (!busy) showPrompt();
+    if (!chat.busy) showPrompt();
     return;
   }
-  if (busy) {
-    queue.push(text);
-    console.log(c.dim(`(queued — runs after the current turn; use /btw for a side question)`));
-    return;
-  }
-  await runMain(text);
+  chat.send(text);
 }
 
 function showPrompt() {
-  if (process.stdin.isTTY) rl.setPrompt(c.bold(`${sessionId ? "›" : "+"} `)), rl.prompt();
+  if (process.stdin.isTTY) rl.setPrompt(c.bold(`${chat.sessionId ? "›" : "+"} `)), rl.prompt();
 }
 
 // ── entry ───────────────────────────────────────────────────────────────────
@@ -324,7 +260,10 @@ async function main() {
   const once = flag("-p") ?? flag("--print");
   if (once !== undefined) {
     rl.on("line", (l) => pendingAsk && (pendingAsk(l), (pendingAsk = null)));
-    await runMain(once);
+    await new Promise<void>((resolve) => {
+      idleWaiter = resolve;
+      chat.send(once);
+    });
     process.exit(0);
   }
 
@@ -342,7 +281,7 @@ async function main() {
     console.log(c.red((err as Error).message));
     process.exit(1);
   }
-  if (sessionId) console.log(c.dim(`Resumed chat ${sessionId}`));
+  if (chat.sessionId) console.log(c.dim(`Resumed chat ${chat.sessionId}`));
   if (harness.mcpSkipped.length) console.log(c.dim(`MCP not configured: ${harness.mcpSkipped.join("; ")}`));
   console.log(c.dim("Type /help for commands.\n"));
 

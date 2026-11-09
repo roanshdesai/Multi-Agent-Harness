@@ -108,6 +108,8 @@ export class Harness {
       cwd: process.cwd(),
       // Subscription-only: strip every API-key credential so billing can't fall back to the API.
       ...(cfg.auth.subscription_only && { env: subscriptionEnv() }),
+      // Packaged desktop app: the engine binary lives outside the asar archive.
+      ...(process.env.HARNESS_CLAUDE_BIN && { pathToClaudeCodeExecutable: process.env.HARNESS_CLAUDE_BIN }),
       model: this.mainModel,
       fallbackModel: cfg.models.fallback.join(","),
       effort: cfg.effort.main,
@@ -190,7 +192,7 @@ export class Harness {
    * Independent verification pass (item 3). Runs on a throwaway fork of the
    * session so the verifier sees full context but adds nothing to the chat.
    */
-  async verify(sessionId: string): Promise<{ pass: boolean; feedback: string }> {
+  async verify(sessionId: string, hooks: TurnHooks = {}): Promise<{ pass: boolean; feedback: string }> {
     const r = await this.run(
       `You are now acting as the VERIFIER for the conversation above. Check the assistant's last answer against what the user asked: re-run tests, open changed files, re-check sources where relevant. Do not modify files.
 Reply with first line "VERDICT: PASS" or "VERDICT: FAIL", then the specific problems and fixes.`,
@@ -203,6 +205,7 @@ Reply with first line "VERDICT: PASS" or "VERDICT: FAIL", then the specific prob
         disallowedTools: ["Write", "Edit", "NotebookEdit", "mcp__github__*"],
         maxTurns: 25,
       },
+      hooks,
     );
     const pass = /VERDICT:\s*PASS/i.test(r.text) && !r.isError;
     return { pass, feedback: r.text };

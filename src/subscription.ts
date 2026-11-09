@@ -43,6 +43,7 @@ export function assertClaudeSubscription(info: AccountInfo): string {
 
 /** Path to the Codex CLI bundled with this project (falls back to one on PATH). */
 export function codexBin(root: string): string {
+  if (process.env.HARNESS_CODEX_BIN) return process.env.HARNESS_CODEX_BIN;
   const local = join(root, "node_modules", ".bin", process.platform === "win32" ? "codex.cmd" : "codex");
   return existsSync(local) ? local : "codex";
 }
