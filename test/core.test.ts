@@ -603,7 +603,7 @@ test("computer use: only allowed apps, run through Codex with the UI model", asy
   cfg.computer_use = { default_app_access: "deny", apps: { "com.google.Chrome": "allow", "bad id; rm -rf": "allow" }, browser: { access: "allow", uploads: "deny" } };
   const a = computerArgs(cfg).join(" ");
   assert.match(a, /computer_use\.default_app_access="deny"/);
-  assert.match(a, /computer_use\.macos\.bundle_ids\."com\.google\.Chrome"="allow"/);
+  assert.match(a, /computer_use\.macos\.bundle_ids=\{"com\.google\.Chrome"="allow"\}/); // one inline table (Codex splits dotted keys)
   assert.doesNotMatch(a, /rm -rf/); // only bundle ids get through
   assert.match(a, /browser_use\.default_origin_policy\.uploads="deny"/);
   cfg.computer_use = {};
@@ -614,7 +614,14 @@ test("computer use: only allowed apps, run through Codex with the UI model", asy
     assert.ok(r.ok, r.text);
     assert.match(r.text, new RegExp(`echo\\(${cfg.models.gui}\\): This is a permissions check`));
     const { helperDown } = await import("../src/tools/computer.js");
-    assert.match(helperDown("computer use: failed to connect to 127.0.0.1:19789: Connection refused")!, /helper isn't running \(nothing answered on 127\.0\.0\.1:19789\)/);
+    const toml = '[mcp_servers.computer-use]\ncommand = "x"\n\n[mcp_servers.palmier-pro]\nurl = "http://127.0.0.1:19789/mcp"\n';
+    // The line Codex 0.167 prints when an HTTP MCP server is down:
+    const log = 'ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (http://127.0.0.1:19789/mcp)")))';
+    assert.match(helperDown(log, toml)!, /MCP server "palmier-pro" \(127\.0\.0\.1:19789\) isn't running/);
+    assert.match(helperDown(log)!, /Nothing answered on 127\.0\.0\.1:19789/);
+    const { approvalHint } = await import("../src/tools/computer.js");
+    assert.match(approvalHint("the tool reported: “Computer Use was not approved to use Finder.”")!, /isn't approved for Finder yet\. Approve it once in the ChatGPT app/);
+    assert.equal(approvalHint("OK Google Drive"), null);
     assert.equal(helperDown("all good"), null);
     const { engine } = { engine: await import("../src/engine.js") };
     assert.equal(engine.expandShortcut("/computer", "test"), null);

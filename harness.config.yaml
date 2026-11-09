@@ -50,8 +50,10 @@ extensions:
 
 computer_use:
   # GPT (models.gui) operates Mac apps and the screen through Codex.
-  # default_app_access: allow lets it use every app; set it to deny to allow
-  # only the apps listed below. To block one app, list it as deny.
+  # These are passed to Codex as computer_use.* settings. With Codex 0.167 and
+  # the ChatGPT app, though, which apps it may use is decided by the ChatGPT
+  # app's own approvals (approve an app there once with "Always allow"); these
+  # settings didn't grant or block anything on their own. Bundle ids below.
   # macOS asks once for Screen Recording and Accessibility permission.
   default_app_access: allow
   apps:

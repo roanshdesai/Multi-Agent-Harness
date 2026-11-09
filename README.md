@@ -100,7 +100,7 @@ Name a connected app with `@` anywhere in a message, for example `@pally find my
 
 | Command | What it does |
 |---|---|
-| `/computer test` / `/computer <task>` | Computer use with GPT (Astra) through Codex. `test` takes one screenshot and describes it, touching nothing, to check permissions. Only apps allowed under `computer_use` in `harness.config.yaml` can be used. |
+| `/computer test` / `/computer <task>` | Computer use with GPT (Astra) through Codex. `test` takes one screenshot and describes it, touching nothing, to check permissions. It can only use apps you've approved for Computer Use in the ChatGPT app (approve one there once with Always allow); if an app isn't approved, it says which. |
 | `/caffeinate [30m \| 2h \| display \| off]` | Keeps the computer awake, like macOS's `caffeinate`: on until you turn it off, or for a set time; `display` keeps the screen on too. An "awake" chip shows at the top; click it to turn it off. |
 | `/remote` | Lets another app (e.g. Pally) control this one through an MCP link: open tabs, send tasks, read replies, answer questions, stop work. Off until you turn it on; a public link needs `brew install cloudflared`. GitHub push approvals stay in the app. |
 | `/handoff` | Writes a `context.md` summary of this chat and offers to continue in a new chat that starts from it. This also happens on its own when a chat's context passes 80% (`context.handoff_at` in `harness.config.yaml`). |
