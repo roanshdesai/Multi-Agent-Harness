@@ -4,6 +4,7 @@ import { Harness } from "./session.js";
 import { ChatEngine, expandShortcut, type ChatEvent, type ChatSummary, type Engine, type HistoryItem } from "./engine.js";
 import { GptChat, listGptChats, isGptChat } from "./gpt-chat.js";
 import type { Ask } from "./guards.js";
+import { isExhausted, loadUsage, formatReset, type UsageSnapshot } from "./usage.js";
 
 export interface TabInfo {
   id: string;
@@ -41,11 +42,20 @@ export class Host {
   activeTab: string | null = null;
   plan?: string;
   commands?: Harness["commands"];
+  /** Latest Claude usage seen by any tab. */
+  usage: UsageSnapshot | null;
 
   constructor(
     readonly cfg: HarnessConfig,
     private askFor: (windowId: number) => Ask,
-  ) {}
+  ) {
+    this.usage = loadUsage(cfg);
+  }
+
+  /** Claude is out of usage right now (so new work goes to GPT). */
+  get claudeLimited() {
+    return this.cfg.limits.fallback_to_gpt && isExhausted(this.usage);
+  }
 
   listen(fn: HostListener) {
     this.listeners.add(fn);
@@ -87,7 +97,9 @@ export class Host {
     const emit = (event: ChatEvent) => {
       const t = this.tabs.get(tab.id);
       if (t && event.type === "user" && t.title === "New chat") t.title = event.text.replace(/\s+/g, " ").slice(0, 48);
+      if (event.type === "usage") this.usage = event.usage;
       this.broadcast({ type: "event", tabId: tab.id, event });
+      if (event.type === "limit") void this.fallbackToGpt(tab.id, event.prompt);
       if (event.type === "busy" || event.type === "session") this.publishTabs();
     };
     if (isGpt(model)) return new GptChat(this.cfg, model, emit);
@@ -103,7 +115,7 @@ export class Host {
     if (this.plan) harness.plan = this.plan;
     if (this.commands) harness.commands = this.commands;
     const gptChat = opts.chatId ? isGptChat(this.cfg, opts.chatId) : false;
-    const model = opts.model ?? (gptChat ? this.cfg.models.gpt[0] : this.cfg.models.main);
+    const model = opts.model ?? (gptChat || this.claudeLimited ? this.cfg.models.gpt[0] : this.cfg.models.main);
     const partial = { id, harness };
     const engine = this.makeEngine(partial, model);
     const tab: Tab = { id, windowId: opts.windowId, engine, harness, title: opts.title ?? "New chat" };
@@ -112,6 +124,47 @@ export class Host {
     this.activeTab = id;
     this.publishTabs();
     return this.info(tab);
+  }
+
+  private note(tabId: string, text: string) {
+    this.broadcast({ type: "event", tabId, event: { type: "note", text } });
+  }
+
+  /**
+   * Claude's usage limit was hit mid-task: carry the conversation over to GPT
+   * in the same tab and re-send the request there.
+   */
+  private async fallbackToGpt(tabId: string, prompt: string) {
+    const t = this.tabs.get(tabId);
+    if (!t) return;
+    const resets = formatReset(this.usage?.resetsAt ?? null);
+    if (!this.cfg.limits.fallback_to_gpt) {
+      this.note(tabId, `Claude's usage limit is reached${resets ? ` (resets ${resets})` : ""}. Pick a GPT model at the top to keep going.`);
+      return;
+    }
+    const sid = t.engine.sessionId;
+    const history = sid ? await t.engine.history(sid).catch(() => []) : [];
+    const transcript = history
+      .slice(-30)
+      .map((h) => `${h.role === "user" ? "User" : h.role === "assistant" ? "Assistant" : `(${h.role})`}: ${h.text.slice(0, 1500)}`)
+      .join("\n");
+    const gpt = this.makeEngine(t, this.cfg.models.gpt[0]) as GptChat;
+    gpt.seed(
+      `You are continuing a task that was running on Claude until its usage limit was reached. Here is the conversation so far:\n\n${transcript || "(no earlier messages)"}\n\nPick up where it left off. The user's latest request follows.`,
+    );
+    t.engine = gpt;
+    this.note(tabId, `Claude's usage limit is reached${resets ? ` (resets ${resets})` : ""}. Continuing this task on ${this.cfg.models.gpt[0]} with your ChatGPT plan.`);
+    this.publishTabs();
+    gpt.send(prompt, "auto");
+  }
+
+  answer(tabId: string, id: string, answers: Record<string, string>) {
+    return this.get(tabId).engine.answer(id, answers);
+  }
+
+  async connections(reconnect?: string) {
+    const h = this.tabs.values().next().value?.harness ?? new Harness(this.cfg, this.askFor(0));
+    return h.connections(reconnect);
   }
 
   async closeTab(tabId: string) {

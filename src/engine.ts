@@ -9,7 +9,8 @@ import {
   type Query,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Harness, type TurnResult } from "./session.js";
+import { Harness, type TurnResult, type AgentQuestion } from "./session.js";
+import type { UsageSnapshot } from "./usage.js";
 
 /** Everything a UI (terminal or desktop) needs to draw a chat. */
 export type ChatEvent =
@@ -23,7 +24,12 @@ export type ChatEvent =
   | { type: "verify"; status: "running" | "pass" | "fail"; round: number; feedback?: string }
   | { type: "turn-end"; numTurns: number; agents: string[]; costUsd: number; isError: boolean; error?: string }
   | { type: "error"; message: string }
-  | { type: "note"; text: string };
+  | { type: "note"; text: string }
+  | { type: "question"; id: string; questions: AgentQuestion[] }
+  | { type: "question-answered"; id: string; answers: Record<string, string> }
+  | { type: "advisor"; status: "asked" | "answered" }
+  | { type: "usage"; usage: UsageSnapshot }
+  | { type: "limit"; prompt: string; resetsAt: number | null };
 
 export interface HistoryItem {
   role: "user" | "assistant" | "agent" | "tool";
@@ -52,6 +58,8 @@ export interface Engine {
   btw(question: string): Promise<string>;
   fork(title?: string): Promise<string>;
   rename(title: string): Promise<void>;
+  /** Answer a question the agent asked (from the app or a linked terminal). */
+  answer(id: string, answers: Record<string, string>): boolean;
 }
 
 export function summarizeInput(input: any): string {
@@ -93,6 +101,8 @@ export class ChatEngine implements Engine {
   busy = false;
   private current: Query | null = null;
   private stopped = false;
+  private questions = new Map<string, (a: Record<string, string>) => void>();
+  private qseq = 0;
   private queue: string[] = [];
   private stateFile: string;
 
@@ -102,6 +112,23 @@ export class ChatEngine implements Engine {
     private opts: { stream?: boolean; cwd?: string } = {},
   ) {
     this.stateFile = join(harness.cfg.root, ".harness", "last-session");
+    // The agent can ask you things; whichever app answers first wins.
+    harness.onQuestion = (questions) =>
+      new Promise((resolve) => {
+        const id = `q${++this.qseq}`;
+        this.questions.set(id, resolve);
+        this.emit({ type: "question", id, questions });
+      });
+    harness.onUsage = (usage) => this.emit({ type: "usage", usage });
+  }
+
+  answer(id: string, answers: Record<string, string>): boolean {
+    const resolve = this.questions.get(id);
+    if (!resolve) return false;
+    this.questions.delete(id);
+    resolve(answers);
+    this.emit({ type: "question-answered", id, answers });
+    return true;
   }
 
   get cwd() {
@@ -128,6 +155,7 @@ export class ChatEngine implements Engine {
   async stop() {
     this.stopped = true;
     this.queue.length = 0;
+    for (const id of [...this.questions.keys()]) this.answer(id, {});
     if (this.current) await this.current.interrupt();
   }
 
@@ -216,6 +244,10 @@ export class ChatEngine implements Engine {
     }
     if (m.type !== "assistant") return;
     const sub = m.parent_tool_use_id !== null;
+    for (const b of m.message.content as { type: string; name?: string }[]) {
+      if (b.type === "server_tool_use" && b.name === "advisor") this.emit({ type: "advisor", status: "asked" });
+      if (b.type === "advisor_tool_result") this.emit({ type: "advisor", status: "answered" });
+    }
     for (const b of m.message.content) {
       if (b.type === "text" && !sub && b.text.trim()) this.emit({ type: "text", text: b.text });
       else if (b.type === "tool_use") {
@@ -252,6 +284,11 @@ export class ChatEngine implements Engine {
             hooks,
           );
         }
+      }
+      if (r.rateLimited) {
+        // Out of Claude usage: the host continues this on GPT if allowed.
+        this.queue.length = 0;
+        this.emit({ type: "limit", prompt, resetsAt: h.usage?.resetsAt ?? null });
       }
       this.emit({
         type: "turn-end",

@@ -5,7 +5,7 @@ A desktop app (Mac, Windows, Linux) and terminal app built on the Claude Agent S
 | Role | Model | Used for |
 |---|---|---|
 | Orchestrator | Claude Opus 5.5 | Plans, delegates and combines the results. It doesn't do the work itself. |
-| Advisor | Claude Fable 5.1 | Used when the agent is stuck (after 3 tool failures in a row) or faces a hard decision |
+| Advisor | Claude Fable 5.1 | Consulted automatically, like in Claude Code: the working model asks it whenever it hits something hard. Also the backstop after 3 tool failures in a row, and `/advisor` asks it directly. |
 | Coder, designer | Claude Fable 5.1 | All coding and UI work |
 | Researcher | Claude Sonnet 5.5 | Scraping, research and general tasks |
 | Summarizer | Claude Sonnet 5.5 | Shortens long pages and logs before the orchestrator reads them |
@@ -50,6 +50,12 @@ Each MCP server is only loaded once its keys are in `.env`. `/status` shows whic
 
 **Memory in the sidebar:** claude-mem and Hindsight open as tabs showing their own viewers, so you can browse and organize what they've stored. A green dot means it's running; otherwise the tab shows how to start it. Addresses are under `memory:` in `harness.config.yaml`.
 
+**MCP servers & apps:** the sidebar's Connections item (or `/connections`, `/mcp`, `/apps`) lists every server the agents can use: the harness's own, ones from your Claude Code setup, plugin servers and claude.ai connectors. It also shows your Claude and ChatGPT accounts and the memory apps. Each server shows its status and tool count. You can reconnect a failed server, turn one off, or add your own by URL or command (saved in `mcp-servers.json`). If a server needs sign-in, open Claude Code (`claude`), run `/mcp` and sign in there.
+
+**Usage:** the bottom of the sidebar shows your Claude plan's 5-hour and weekly usage; `/usage` shows the details and reset times. If Claude runs out, the task that hit the limit carries its conversation over to GPT in the same tab and keeps going, and new tabs start on GPT until Claude resets. Turn this off with `limits.fallback_to_gpt: false`.
+
+**Questions:** the agent can stop and ask you something. It shows as a card with options in the app and as a numbered question in a linked terminal; answer in either.
+
 **/subagents:** describe the subagents you want, or leave it empty and the Fable advisor looks at the project and suggests some. You review each proposal and pick which to add. They're saved in `subagents.yaml`, and GPT-based ones run through a Sonnet coordinator that calls GPT.
 
 
@@ -85,6 +91,8 @@ The terminal version (`npm start`) runs on the same engine and has the same comm
 | `/tabs` `/tab <n>` `/detach` | Terminal linked to the app |
 | `/design [q]` | Search your UI links (include `swift` to see the SwiftUI ones) |
 | `/remember` `/recall` | Save to or search long-term memory |
+| `/usage` | Claude plan usage, ChatGPT status |
+| `/connections` (`/mcp`, `/apps`) | MCP servers and apps |
 | `/status` `/agents` `/model` `/verify on\|off` `/eval` | Inspect and control the harness |
 
 Both apps share one command list (`src/commands.ts`). `/help` and the `/` menu also list every installed skill and plugin command, such as Superpowers, gstack and taste-skill, read live from the session. Typing part of a name finds plugin commands too: `/brain` finds `/superpowers:brainstorm`. Any other `/command` goes straight to the agent.
@@ -118,6 +126,8 @@ src/gpt-chat.ts         GPT chat engine (Codex, ChatGPT plan)
 src/codex.ts            runs Codex turns and parses its JSON events
 src/subagents.ts        /subagents storage and the advisor's design prompt
 src/tools/gpt.ts        ask_gpt and image tools for the Claude team
+src/connections.ts      MCP servers & apps: status, add, turn off
+src/usage.ts            Claude plan usage windows and the GPT switch rule
 src/cli.ts              terminal app
 src/desktop/main.ts     desktop app (Electron main process)
 desktop/renderer/       desktop window UI

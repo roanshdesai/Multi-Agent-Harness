@@ -23,6 +23,12 @@ contextBridge.exposeInMainWorld("harness", {
   designSubagents: (request) => invoke("subagents-design", request),
   saveSubagents: (list) => invoke("subagents-save", list),
   removeSubagent: (name) => invoke("subagents-remove", name),
+  usage: () => invoke("usage"),
+  connections: (reconnect) => invoke("connections", reconnect),
+  mcpToggle: (name, enabled) => invoke("mcp-toggle", name, enabled),
+  mcpAdd: (name, spec) => invoke("mcp-add", name, spec),
+  mcpRemove: (name) => invoke("mcp-remove", name),
+  answer: (tabId, id, answers) => invoke("answer", tabId, id, answers),
   // tabs
   newTab: (opts) => invoke("tab-new", opts),
   closeTab: (tabId) => invoke("tab-close", tabId),

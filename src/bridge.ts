@@ -89,6 +89,10 @@ async function handle(host: Host, r: Req, onOpenTab: (id: string) => void, defau
       return host.fork(tabId, r.title ? String(r.title) : undefined);
     case "set-model":
       return host.setModel(tabId, String(r.model));
+    case "answer":
+      return host.answer(tabId, String(r.qid), (r.answers ?? {}) as Record<string, string>);
+    case "usage":
+      return host.usage;
     default:
       throw new Error(`Unknown op ${r.op}`);
   }

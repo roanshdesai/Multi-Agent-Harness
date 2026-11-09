@@ -28,7 +28,18 @@ effort:
   worker: medium
   verifier: high
 
-# Escalate to the Fable advisor after this many consecutive tool failures
+advisor:
+  # Like Claude Code: the working model consults the advisor model (above) on its
+  # own whenever it hits something hard. Uses the server-side advisor tool.
+  auto: true
+
+limits:
+  # When the Claude plan's usage limit is reached, continue the task on GPT
+  # (ChatGPT plan) and send new tabs there until the limit resets.
+  fallback_to_gpt: true
+  warn_at: 0.8   # show a heads-up when a usage window passes 80%
+
+# Also escalate to the advisor subagent after this many consecutive tool failures
 stuck_after_failures: 3
 
 verify:

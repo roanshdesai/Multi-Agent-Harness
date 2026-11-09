@@ -37,6 +37,8 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
   { name: "/recall", args: "<question>", description: "Search long-term memory (Hindsight + claude-mem)", group: "Memory" },
 
   { name: "/agents", description: "Show the team and their models", group: "Harness" },
+  { name: "/usage", description: "Claude plan usage (5-hour and weekly) and ChatGPT status", group: "Harness" },
+  { name: "/connections", description: "MCP servers and apps: status, reconnect, turn off, add", group: "Harness", aliases: ["/mcp", "/apps"] },
   { name: "/status", description: "Plans, models, integrations, plugins", group: "Harness" },
   { name: "/model", args: "[id]", description: "Change this tab's model, Claude or GPT", group: "Harness" },
   { name: "/verify", args: "on | off", description: "Turn the Fable verifier on or off", group: "Harness" },

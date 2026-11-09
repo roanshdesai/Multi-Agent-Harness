@@ -123,6 +123,16 @@ export class GptChat implements Engine {
     throw new Error("Forking isn't available for GPT chats yet.");
   }
 
+  answer(): boolean {
+    return false; // Codex runs non-interactively; it doesn't ask questions mid-turn
+  }
+
+  /** Start this chat with context carried over from a Claude conversation. */
+  seed(context: string) {
+    this.pendingContext = context;
+  }
+  private pendingContext = "";
+
   async rename(title: string) {
     this.title = title;
     this.save();
@@ -165,7 +175,9 @@ export class GptChat implements Engine {
       if (!status.ok) throw new Error(`GPT unavailable: ${status.detail}`);
       if (!this.title) this.title = prompt.replace(/\s+/g, " ").slice(0, 60);
       this.items.push({ role: "user", text: prompt });
-      const run = runCodex({ root: this.cfg.root, model: this.model, prompt, cwd: this.cwd, resume: this.sessionId, onEvent: this.onCodexEvent });
+      const full = this.pendingContext ? `${this.pendingContext}\n\n${prompt}` : prompt;
+      this.pendingContext = "";
+      const run = runCodex({ root: this.cfg.root, model: this.model, prompt: full, cwd: this.cwd, resume: this.sessionId, onEvent: this.onCodexEvent });
       this.child = run.child;
       const r = await run.done;
       if (r.threadId && !this.sessionId) this.sessionId = r.threadId;

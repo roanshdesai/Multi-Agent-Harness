@@ -15,6 +15,9 @@ import { codexStatus } from "./subscription.js";
 import { connectBridge, type BridgeClient } from "./bridge.js";
 import { upsertSubagents, removeSubagent } from "./subagents.js";
 import type { TabInfo } from "./host.js";
+import type { AgentQuestion } from "./session.js";
+import { describeUsage, isExhausted, formatReset } from "./usage.js";
+import { saveCustomServer, removeCustomServer, setDisabled, parseServerSpec } from "./connections.js";
 
 const c = {
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
@@ -67,6 +70,7 @@ function render(e: ChatEvent) {
       console.log(c.cyan(`⇢ ${e.agent}: ${e.description.slice(0, 80)}`));
       break;
     case "tool":
+      if (e.name === "AskUserQuestion") break; // shown as the question itself
       console.log(c.dim(`${e.sub ? "   ↳ " : "⏺ "}${e.name}(${e.summary.slice(0, 100)})`));
       break;
     case "verify":
@@ -88,6 +92,29 @@ function render(e: ChatEvent) {
     case "note":
       console.log(c.dim(e.text));
       break;
+    case "advisor":
+      if (e.status === "asked") console.log(c.cyan(`✦ consulting the advisor (${cfg.models.advisor})…`));
+      break;
+    case "question":
+      void askQuestions(e.id, e.questions);
+      break;
+    case "question-answered":
+      if (openQuestion === e.id) {
+        openQuestion = null;
+        pendingAsk = null; // answered elsewhere: stop waiting for a line here
+        console.log(c.dim(`(answered${e.answers ? `: ${Object.values(e.answers).join(" · ")}` : ""})`));
+        if (!busy) showPrompt();
+      }
+      break;
+    case "usage":
+      if (e.usage.windows.some((w) => (w.utilization ?? 0) >= cfg.limits.warn_at) && !warnedUsage) {
+        warnedUsage = true;
+        console.log(c.yellow(`Heads-up: ${e.usage.windows.map((w) => `${w.label} ${Math.round((w.utilization ?? 0) * 100)}%`).join(", ")}`));
+      }
+      break;
+    case "limit":
+      if (!bridge) void continueOnGpt(e.prompt, e.resetsAt);
+      break;
     case "busy":
       busy = e.busy;
       if (!e.busy) {
@@ -98,8 +125,44 @@ function render(e: ChatEvent) {
   }
 }
 
+// ── questions the agent asks (AskUserQuestion) ─────────────────────────────
+let openQuestion: string | null = null;
+let warnedUsage = false;
+async function askQuestions(id: string, questions: AgentQuestion[]) {
+  openQuestion = id;
+  const answers: Record<string, string> = {};
+  for (const q of questions) {
+    if (openQuestion !== id) return; // answered in the app first
+    console.log(`\n${c.bold(c.yellow(`? ${q.header ? `[${q.header}] ` : ""}${q.question}`))}`);
+    q.options.forEach((o, i) => console.log(`  ${c.bold(String(i + 1))}. ${o.label}${o.description ? c.dim(` — ${o.description}`) : ""}`));
+    const raw = (await ask(`  ${q.multiSelect ? "Numbers, comma-separated" : "Number"}, or type your own answer: `)).trim();
+    if (openQuestion !== id) return;
+    const nums = raw.split(/[,\s]+/).map(Number).filter((n) => n >= 1 && n <= q.options.length);
+    answers[q.question] = nums.length && /^[\d,\s]+$/.test(raw) ? nums.map((n) => q.options[n - 1].label).join(", ") : raw || "(no answer, use your judgment)";
+  }
+  if (openQuestion !== id) return;
+  if (bridge && tabId) await bridge.request("answer", { tabId, qid: id, answers });
+  else engine.answer(id, answers);
+}
+
+// ── out of Claude usage: continue on GPT (standalone terminal) ──────────────
+async function continueOnGpt(prompt: string, resetsAt: number | null) {
+  if (!cfg.limits.fallback_to_gpt) {
+    console.log(c.yellow(`Claude's usage limit is reached${resetsAt ? ` (resets ${formatReset(resetsAt)})` : ""}. Use /model ${cfg.models.gpt[0]} to keep going.`));
+    return;
+  }
+  const history = engine.sessionId ? await engine.history(engine.sessionId).catch(() => []) : [];
+  const transcript = history.slice(-30).map((h) => `${h.role}: ${h.text.slice(0, 1500)}`).join("\n");
+  const gpt = new GptChat(cfg, cfg.models.gpt[0], render);
+  gpt.seed(`You are continuing a task that was running on Claude until its usage limit was reached. Conversation so far:\n\n${transcript || "(none)"}\n\nPick up where it left off. The user's latest request follows.`);
+  engine = gpt;
+  console.log(c.yellow(`Claude's usage limit is reached${resetsAt ? ` (resets ${formatReset(resetsAt)})` : ""}. Continuing on ${cfg.models.gpt[0]} with your ChatGPT plan.`));
+  gpt.send(prompt, "auto");
+}
+
 // ── local engine (used when the app isn't running) ──────────────────────────
-let engine: Engine = new ChatEngine(harness, render);
+let engine: Engine =
+  cfg.limits.fallback_to_gpt && isExhausted(harness.usage) && !flag("--model") ? new GptChat(cfg, cfg.models.gpt[0], render) : new ChatEngine(harness, render);
 function useModel(model: string) {
   const want = isGpt(model);
   if (want !== (engine.kind === "gpt")) {
@@ -359,6 +422,43 @@ async function command(line: string): Promise<boolean> {
       harness.verifyEnabled = arg !== "off";
       console.log(`Verifier ${harness.verifyEnabled ? "on" : "off"}.`);
       return true;
+    case "/usage": {
+      const u = bridge ? await bridge.request("usage") : harness.usage;
+      console.log(c.bold("Claude plan"));
+      for (const l of describeUsage(u)) console.log(`  ${l}`);
+      const codex = codexStatus(cfg.root);
+      console.log(c.bold("ChatGPT plan") + `\n  ${codex.ok ? `Signed in · ${cfg.models.gpt.join(", ")}` : codex.detail}`);
+      console.log(c.dim(cfg.limits.fallback_to_gpt ? `If Claude runs out, the task continues on ${cfg.models.gpt[0]}.` : "Automatic switch to GPT is off (limits.fallback_to_gpt)."));
+      return true;
+    }
+    case "/connections": {
+      const [sub, name, ...more] = arg.split(/\s+/);
+      if (sub === "add" && name) {
+        const saved = saveCustomServer(cfg, name, parseServerSpec(more.join(" ")));
+        console.log(c.green(`Added ${saved}. Available from your next message.`));
+        return true;
+      }
+      if (sub === "remove" && name) {
+        console.log(removeCustomServer(cfg, name) ? c.green("Removed.") : c.red("Only servers you added can be removed; use /connections off <name> for others."));
+        return true;
+      }
+      if ((sub === "off" || sub === "on") && name) {
+        setDisabled(cfg, name, sub === "off");
+        console.log(c.green(`${name} turned ${sub}.`));
+        return true;
+      }
+      console.log(c.dim(sub === "reconnect" && name ? `Reconnecting ${name}…` : "Checking MCP servers…"));
+      const list = await harness.connections(sub === "reconnect" ? name : undefined);
+      const icon = (st: string) => (st === "connected" ? c.green("●") : st === "failed" ? c.red("●") : st === "disabled" ? c.dim("○") : c.yellow("●"));
+      for (const x of list)
+        console.log(
+          `${icon(x.status)} ${x.name.padEnd(22)} ${c.dim(x.source.padEnd(9))} ${x.status === "connected" ? `${x.tools} tools` : x.status === "needs-auth" ? c.yellow("needs sign-in: run claude → /mcp") : x.status === "disabled" ? c.dim("off") : c.red(x.error ?? x.status)}`,
+        );
+      const codex = codexStatus(cfg.root);
+      console.log(`${codex.ok ? c.green("●") : c.yellow("●")} ${"ChatGPT (Codex)".padEnd(22)} ${c.dim("account  ")} ${codex.detail}`);
+      console.log(c.dim("\n/connections add <name> <url | command>  ·  remove <name>  ·  off|on <name>  ·  reconnect <name>"));
+      return true;
+    }
     case "/subagents":
       try {
         await subagentsCommand(arg);

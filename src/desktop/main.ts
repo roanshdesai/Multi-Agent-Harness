@@ -12,6 +12,7 @@ import { runEvals } from "../eval.js";
 import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "../tools/design-library.js";
 import { codexStatus } from "../subscription.js";
 import { upsertSubagents, removeSubagent, type CustomSubagent } from "../subagents.js";
+import { saveCustomServer, removeCustomServer, setDisabled, parseServerSpec } from "../connections.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(here, "..", ".."); // repo root (dev) or app.asar (packaged)
@@ -242,6 +243,14 @@ ipcMain.handle("pick-workspace", async (e) => {
 ipcMain.handle("open-config", () => shell.openPath(join(cfg.root, "harness.config.yaml")));
 ipcMain.handle("open-design-library", () => shell.openPath(cfg.design_library));
 ipcMain.handle("open-subagents-file", () => shell.openPath(cfg.subagents_file));
+
+// Usage and connections
+ipcMain.handle("usage", () => ({ usage: host.usage, limited: host.claudeLimited, gpt: cfg.models.gpt[0], codex: codexStatus(cfg.root) }));
+ipcMain.handle("connections", (_e, reconnect?: string) => host.connections(reconnect));
+ipcMain.handle("mcp-toggle", (_e, name: string, enabled: boolean) => setDisabled(cfg, name, !enabled));
+ipcMain.handle("mcp-add", (_e, name: string, spec: string) => saveCustomServer(cfg, name, parseServerSpec(spec)));
+ipcMain.handle("mcp-remove", (_e, name: string) => removeCustomServer(cfg, name));
+ipcMain.handle("answer", (_e, tabId: string, id: string, answers: Record<string, string>) => host.answer(tabId, id, answers));
 
 // /subagents
 ipcMain.handle("subagents-design", (e, request: string) => host.harnessFor(String(host.list(wid(e.sender))[0]?.id)).designSubagents(request));

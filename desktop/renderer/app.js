@@ -192,6 +192,7 @@ function addAgent(s, id, agent, description) {
   s.lastAgent = entry;
 }
 function addTool(s, name, summary, sub) {
+  if (name === "AskUserQuestion") return; // shown as a question card instead
   const row = el("div", "tool-row");
   row.append(el("b", "", name), document.createTextNode(` ${summary}`));
   if (sub && s.lastAgent) {
@@ -262,6 +263,243 @@ function renderHistory(s, items) {
   s.view.scrollTop = s.view.scrollHeight;
 }
 
+// ── questions from the agent (AskUserQuestion) ─────────────────────────────
+function addQuestion(s, id, questions) {
+  endLive(s);
+  const card = el("div", "question");
+  card.dataset.qid = id;
+  const picks = new Map(); // question text → Set(labels)
+  const others = new Map();
+  for (const q of questions) {
+    const head = el("div", "q-head");
+    head.innerHTML = `${svg("M12 18h.01M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3")} ${q.header ? q.header : "Question"}`;
+    card.append(head, el("div", "q-text", q.question));
+    const opts = el("div", "opts");
+    picks.set(q.question, new Set());
+    for (const o of q.options) {
+      const b = el("button", "opt");
+      b.append(el("span", "", o.label));
+      if (o.description) b.append(el("small", "", o.description));
+      b.onclick = () => {
+        const set = picks.get(q.question);
+        if (!q.multiSelect) {
+          set.clear();
+          opts.querySelectorAll(".opt").forEach((n) => n.classList.remove("picked"));
+        }
+        if (set.has(o.label)) set.delete(o.label);
+        else set.add(o.label);
+        b.classList.toggle("picked", set.has(o.label));
+        if (!q.multiSelect && questions.length === 1) submitAnswers();
+      };
+      opts.appendChild(b);
+    }
+    const other = el("div", "other");
+    const inp = el("input");
+    inp.placeholder = "Something else…";
+    others.set(q.question, inp);
+    inp.onkeydown = (e) => e.key === "Enter" && submitAnswers();
+    other.appendChild(inp);
+    card.append(opts, other);
+  }
+  const acts = el("div", "q-actions");
+  const skip = el("button", "ghost", "Skip");
+  const send = el("button", "primary", "Answer");
+  acts.append(skip, send);
+  card.append(acts, el("div", "q-answer", ""));
+  function submitAnswers() {
+    const answers = {};
+    for (const q of questions) {
+      const typed = others.get(q.question).value.trim();
+      const chosen = [...picks.get(q.question)];
+      answers[q.question] = typed || chosen.join(", ") || "(no answer)";
+    }
+    api.answer(s.id, id, answers);
+  }
+  send.onclick = submitAnswers;
+  skip.onclick = () => api.answer(s.id, id, Object.fromEntries(questions.map((q) => [q.question, "(skipped, use your judgment)"])));
+  append(s, card);
+  s.view.scrollTop = s.view.scrollHeight;
+  if (s.id !== active) renderTabs();
+}
+function markAnswered(s, id, answers) {
+  const card = s.view.querySelector(`.question[data-qid="${id}"]`);
+  if (!card) return;
+  card.classList.add("done");
+  card.querySelector(".q-answer").textContent = `Answered: ${Object.values(answers).join(" · ") || "skipped"}`;
+}
+
+// ── advisor (consulted automatically, like Claude Code) ────────────────────
+function addAdvice(s, status) {
+  if (status === "answered") {
+    const last = [...s.view.querySelectorAll(".advice")].pop();
+    if (last) {
+      last.querySelector(".spinner")?.remove();
+      last.querySelector(".txt").textContent = "Consulted the advisor";
+    }
+    return;
+  }
+  endLive(s);
+  const a = el("div", "advice");
+  const chip = el("span", "agent-chip");
+  chip.append(el("span", "", "advisor"), el("span", "model", shortModel(info.models.advisor)));
+  const spin = el("span", "spinner");
+  spin.style.setProperty("--c", "var(--a-advisor)");
+  a.append(chip, el("span", "txt", "Hit something hard, asking the advisor…"), spin);
+  append(s, a);
+}
+
+// ── usage ──────────────────────────────────────────────────────────────────
+let usageState = null;
+function fmtReset(at) {
+  if (!at) return "";
+  const d = new Date(at);
+  return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+function meter(w) {
+  const pct = w.utilization == null ? null : Math.round(w.utilization * 100);
+  const m = el("div", `meter${pct >= 100 || w.status === "rejected" ? " full" : pct >= 80 ? " warn" : ""}`);
+  m.append(el("span", "", w.label), el("span", "", pct == null ? "?" : `${pct}%`));
+  const bar = el("div", "bar");
+  const fill = el("i");
+  fill.style.width = `${Math.min(100, pct ?? 0)}%`;
+  bar.appendChild(fill);
+  m.appendChild(bar);
+  if (w.resetsAt) m.title = `Resets ${fmtReset(w.resetsAt)}`;
+  return m;
+}
+async function refreshUsage(u) {
+  usageState = u ?? (await api.usage());
+  const box = $("usageBtn");
+  box.textContent = "";
+  const windows = usageState.usage?.windows ?? [];
+  if (!windows.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  for (const w of windows.filter((w) => ["five_hour", "seven_day"].includes(w.key))) box.appendChild(meter(w));
+}
+async function showUsage() {
+  await refreshUsage();
+  const u = usageState;
+  const box = el("div", "usage-big");
+  box.appendChild(el("div", "chat-group", "Claude plan"));
+  if (!u.usage?.windows?.length) box.appendChild(el("p", "", "No usage reported yet. It shows up after your first message."));
+  for (const w of u.usage?.windows ?? []) {
+    const m = meter(w);
+    if (w.resetsAt) m.appendChild(el("span", "", `Resets ${fmtReset(w.resetsAt)}`));
+    box.appendChild(m);
+  }
+  if (u.usage) box.appendChild(el("p", "", `As of ${new Date(u.usage.at).toLocaleTimeString()}.`));
+  box.appendChild(el("div", "chat-group", "ChatGPT plan"));
+  box.appendChild(el("p", "", u.codex.ok ? `Signed in. ${u.gpt} is ready.` : u.codex.detail));
+  const c = el("div", `callout${u.limited ? " bad" : ""}`);
+  c.textContent = u.limited
+    ? `Claude is at its limit until ${fmtReset(u.usage?.resetsAt)}. New tasks and the task that hit the limit continue on ${shortModel(u.gpt)}.`
+    : `If Claude runs out, the task that hit the limit continues on ${shortModel(u.gpt)} with your ChatGPT plan, and new tabs start there until Claude resets.`;
+  box.appendChild(c);
+  modal("Usage", box);
+}
+$("usageBtn").onclick = showUsage;
+
+// ── connections: MCP servers and apps ──────────────────────────────────────
+let connState = [];
+function connSummary(list) {
+  const on = list.filter((c) => c.status === "connected").length;
+  const bad = list.filter((c) => ["failed", "needs-auth"].includes(c.status)).length;
+  $("connCount").textContent = `${on} connected${bad ? ` · ${bad} need attention` : ""}`;
+  $("connDot").className = `dot ${bad ? "warn" : on ? "ok" : ""}`;
+}
+async function refreshConnections(reconnect) {
+  connState = await api.connections(reconnect);
+  connSummary(connState);
+  return connState;
+}
+async function showConnections() {
+  const box = el("div");
+  const render = async (reconnect) => {
+    box.textContent = "";
+    box.appendChild(el("p", "", reconnect ? `Reconnecting ${reconnect}…` : "Checking servers…"));
+    const list = await refreshConnections(reconnect);
+    box.textContent = "";
+    // Accounts & memory apps
+    box.appendChild(el("div", "chat-group", "Accounts & apps"));
+    const apps = [
+      { name: "Claude plan", ok: !!info.auth.plan || !info.subscriptionOnly, sub: info.auth.plan ? `Signed in (${info.auth.plan})` : !info.subscriptionOnly ? "API billing allowed (HARNESS_ALLOW_API=1)" : info.auth.error?.split("\n")[0] || "Not signed in" },
+      { name: "ChatGPT plan (Codex)", ok: info.codex.ok, sub: info.codex.detail },
+      { name: "claude-mem", ok: memStatus?.claudeMem.up, sub: memStatus?.claudeMem.up ? memStatus.claudeMem.url : "Not running" },
+      { name: "Hindsight", ok: memStatus?.hindsight.up, sub: memStatus?.hindsight.up ? memStatus.hindsight.url : "Not running (docker compose up -d hindsight)" },
+    ];
+    for (const a of apps) {
+      const r = el("div", "conn-row");
+      r.append(el("span", `status-dot ${a.ok ? "connected" : "failed"}`), el("div", "name", a.name), el("div", "sub", a.sub));
+      box.appendChild(r);
+    }
+    // MCP servers
+    box.appendChild(el("div", "chat-group", `MCP servers (${list.length})`));
+    if (!list.length) box.appendChild(el("p", "", "No MCP servers found."));
+    for (const c of list) {
+      const r = el("div", "conn-row");
+      const name = el("div", "name", c.name);
+      name.appendChild(el("span", "src", c.source));
+      const detail =
+        c.status === "connected"
+          ? `${c.tools} tool${c.tools === 1 ? "" : "s"}${c.target ? ` · ${c.target}` : ""}`
+          : c.status === "needs-auth"
+            ? "Needs sign-in: open Claude Code (claude), run /mcp, and sign in to it"
+            : c.status === "disabled"
+              ? "Turned off"
+              : c.error || c.target || c.status;
+      const sub = el("div", "sub", detail);
+      sub.title = detail;
+      const acts = el("div", "acts");
+      if (["failed", "needs-auth", "pending"].includes(c.status)) {
+        const rc = el("button", "ghost", "Reconnect");
+        rc.onclick = () => render(c.name);
+        acts.appendChild(rc);
+      }
+      const tg = el("button", "ghost", c.enabled ? "Turn off" : "Turn on");
+      tg.onclick = async () => {
+        await api.mcpToggle(c.name, !c.enabled);
+        render();
+      };
+      acts.appendChild(tg);
+      if (c.removable) {
+        const rm = el("button", "ghost", "Remove");
+        rm.onclick = async () => {
+          await api.mcpRemove(c.name);
+          render();
+        };
+        acts.appendChild(rm);
+      }
+      r.append(el("span", `status-dot ${c.status}`), name, sub, acts);
+      box.appendChild(r);
+    }
+    // Add
+    box.appendChild(el("div", "chat-group", "Add an MCP server"));
+    const form = el("div", "add-conn");
+    const nm = el("input");
+    nm.placeholder = "Name, e.g. notion";
+    const spec = el("input");
+    spec.placeholder = "URL (https://…) or command (npx -y some-mcp-server)";
+    const add = el("button", "primary", "Add");
+    add.onclick = async () => {
+      try {
+        await api.mcpAdd(nm.value, spec.value);
+        render();
+      } catch (err) {
+        add.textContent = "Check the name and address";
+      }
+    };
+    form.append(nm, spec, add);
+    box.appendChild(form);
+    box.appendChild(el("p", "", "Servers you add are saved in mcp-servers.json and available to every tab from the next message. Servers from your Claude Code setup and claude.ai connectors show up here automatically."));
+  };
+  modal("MCP servers & apps", box);
+  render();
+}
+$("connBtn").onclick = showConnections;
+
 // ── events from the engine, per tab ────────────────────────────────────────
 api.onEvent(({ tabId, event: e }) => {
   const s = stateOf(tabId);
@@ -312,7 +550,19 @@ api.onEvent(({ tabId, event: e }) => {
       addNote(s, e.message, "error");
       break;
     case "note":
-      addNote(s, e.text, /^FAIL/.test(e.text) ? "error" : "");
+      addNote(s, e.text, /^FAIL/.test(e.text) ? "error" : /usage limit/.test(e.text) ? "error" : "");
+      break;
+    case "question":
+      addQuestion(s, e.id, e.questions);
+      break;
+    case "question-answered":
+      markAnswered(s, e.id, e.answers);
+      break;
+    case "advisor":
+      addAdvice(s, e.status);
+      break;
+    case "usage":
+      refreshUsage();
       break;
   }
 });
@@ -923,6 +1173,12 @@ async function submit() {
       return showAgents();
     case "/subagents":
       return showSubagents(arg, !!arg);
+    case "/usage":
+      return showUsage();
+    case "/connections":
+    case "/mcp":
+    case "/apps":
+      return showConnections();
     case "/status":
       return showStatus();
     case "/help":
@@ -1025,7 +1281,8 @@ async function start() {
   renderPlans();
   for (const t of info.tabs) ensureChatTab(t);
   activate(info.tabs[info.tabs.length - 1].id);
-  await Promise.all([refreshChats(), refreshMemory()]);
+  await Promise.all([refreshChats(), refreshMemory(), refreshUsage()]);
+  void refreshConnections();
   const agents = await api.agents();
   $("teamCount").textContent = `${agents.length} agents · ${agents.filter((a) => a.custom).length} yours`;
   autoSize();

@@ -53,6 +53,17 @@
           </div>
 
           <div class="side-section">
+            <div class="side-label">Connections</div>
+            <button class="side-item" id="connBtn">
+              <span class="mem-icon conn">
+                <svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5" /></svg>
+              </span>
+              <span class="side-text">MCP servers & apps<small id="connCount">Checking…</small></span>
+              <span class="dot" id="connDot"></span>
+            </button>
+          </div>
+
+          <div class="side-section">
             <div class="side-label">Team</div>
             <button class="side-item" id="teamBtn">
               <span class="mem-icon team">
@@ -73,6 +84,7 @@
             <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
             <span id="workspaceName">…</span>
           </button>
+          <button class="usage" id="usageBtn" title="Claude plan usage (/usage)"></button>
           <div class="plans" id="plans"></div>
         </div>
       </aside>

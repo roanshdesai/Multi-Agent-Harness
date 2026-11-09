@@ -227,3 +227,65 @@ test("bridge: a terminal client gets tab lists and events, and its sends reach t
   server.close();
   process.env.HOME = oldHome;
 });
+
+// ── usage, connections, GPT handoff ────────────────────────────────────────
+test("usage: reads the plan windows and knows when Claude is out", async () => {
+  const { toSnapshot, isExhausted, describeUsage } = await import("../src/usage.js");
+  const soon = Math.floor(Date.now() / 1000) + 3600;
+  const ok = toSnapshot({ status: "allowed", resetsAt: soon, rateLimitType: "five_hour", overageStatus: "rejected",
+    unifiedWindows: { five_hour: { utilization: 0.72, resetsAt: soon, status: "allowed" }, seven_day: { utilization: 0.23, resetsAt: soon + 86400, status: "allowed" } } } as any);
+  assert.deepEqual(ok.windows.map((w) => [w.key, w.utilization]), [["five_hour", 0.72], ["seven_day", 0.23]]);
+  assert.equal(ok.windows[0].resetsAt, soon * 1000);
+  assert.equal(isExhausted(ok), false);
+  const out = toSnapshot({ status: "rejected", resetsAt: soon, rateLimitType: "five_hour", overageStatus: "rejected" } as any);
+  assert.equal(isExhausted(out), true);
+  assert.equal(isExhausted({ ...out, overage: "allowed" }), false); // extra usage still available
+  assert.equal(isExhausted({ ...out, resetsAt: Date.now() - 1000 }), false); // already reset
+  assert.match(describeUsage(out).join("\n"), /New work goes to GPT/);
+});
+
+test("connections: add servers from a URL or a command; /mcp and /apps open connections", async () => {
+  const { parseServerSpec, saveCustomServer, loadCustomServers, removeCustomServer, setDisabled, loadDisabled } = await import("../src/connections.js");
+  assert.deepEqual(parseServerSpec("https://mcp.notion.com/mcp Authorization=Bearer_x"), { type: "http", url: "https://mcp.notion.com/mcp", headers: { Authorization: "Bearer_x" } });
+  assert.deepEqual(parseServerSpec('npx -y @modelcontextprotocol/server-filesystem "/Users/me/My Docs"'), { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/My Docs"] });
+  assert.throws(() => parseServerSpec("   "));
+  const cfg = tmpCfg();
+  assert.equal(saveCustomServer(cfg, "My Notion", parseServerSpec("https://x.example/mcp")), "my-notion");
+  assert.throws(() => saveCustomServer(cfg, "harness", parseServerSpec("https://x")));
+  assert.deepEqual(Object.keys(loadCustomServers(cfg)), ["my-notion"]);
+  setDisabled(cfg, "slack", true);
+  assert.deepEqual(loadDisabled(cfg), ["slack"]);
+  setDisabled(cfg, "slack", false);
+  assert.deepEqual(loadDisabled(cfg), []);
+  assert.ok(removeCustomServer(cfg, "my-notion"));
+  const { canonical } = await import("../src/commands.js");
+  assert.equal(canonical("/mcp"), "/connections");
+  assert.equal(canonical("/apps"), "/connections");
+});
+
+test("out of Claude usage: the tab carries the conversation over to GPT and re-sends the request", async () => {
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const { loadConfig } = await import("../src/config.js");
+  const { Host } = await import("../src/host.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const host = new Host(cfg, () => async () => "n");
+  const events: any[] = [];
+  host.listen((m) => m.type === "event" && events.push(m.event));
+  const tab = host.createTab({ windowId: 1 });
+  assert.equal(tab.kind, "claude");
+  await (host as any).fallbackToGpt(tab.id, "finish the report");
+  const after = host.list().find((t) => t.id === tab.id)!;
+  assert.equal(after.kind, "gpt");
+  const t0 = Date.now();
+  while (host.list()[0].busy || !events.some((e) => e.type === "text")) {
+    if (Date.now() - t0 > 5000) break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.ok(events.some((e) => e.type === "note" && /usage limit is reached/.test(e.text)));
+  assert.ok(events.some((e) => e.type === "user" && e.text === "finish the report" && e.source === "auto"));
+  const text = events.find((e) => e.type === "text")?.text ?? "";
+  assert.match(text, /continuing a task that was running on Claude/); // context was carried over
+  assert.match(text, /finish the report/);
+  delete process.env.HARNESS_CODEX_BIN;
+});

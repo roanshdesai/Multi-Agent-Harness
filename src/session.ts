@@ -18,6 +18,26 @@ import { askGptTool, imageTool } from "./tools/gpt.js";
 import { pushApprovalHook, stuckDetector, type Ask } from "./guards.js";
 import { assertClaudeSubscription, subscriptionEnv } from "./subscription.js";
 import { HARNESS_COMMANDS, mergeCommands, type CommandInfo } from "./commands.js";
+import { loadCustomServers, loadDisabled, readConnections, type ConnectionInfo } from "./connections.js";
+import { toSnapshot, saveUsage, loadUsage, type UsageSnapshot } from "./usage.js";
+
+/** One question the agent asks you (AskUserQuestion). */
+export interface AgentQuestion {
+  question: string;
+  header?: string;
+  options: { label: string; description?: string }[];
+  multiSelect?: boolean;
+}
+export type QuestionHandler = (questions: AgentQuestion[]) => Promise<Record<string, string>>;
+
+// The SDK warns that canUseTool is "shadowed" under bypassPermissions. It is
+// still called for AskUserQuestion, which is the only thing we use it for.
+const emitWarning = process.emitWarning.bind(process);
+process.emitWarning = ((w: unknown, ...rest: unknown[]) => {
+  const code = typeof rest[0] === "object" && rest[0] ? (rest[0] as { code?: string }).code : rest[1];
+  if (String(code ?? w).includes("CAN_USE_TOOL_SHADOWED")) return;
+  return (emitWarning as (...a: unknown[]) => void)(w, ...rest);
+}) as typeof process.emitWarning;
 
 const ORCHESTRATOR_PROMPT = `
 # Harness routing rules
@@ -73,6 +93,8 @@ export interface TurnResult {
   costUsd: number;
   agentsUsed: string[];
   structured?: unknown;
+  /** Claude refused because the plan's usage limit is reached. */
+  rateLimited?: boolean;
 }
 
 export interface TurnHooks {
@@ -87,6 +109,11 @@ export class Harness {
   verifyEnabled: boolean;
   /** Claude plan name once the subscription check has passed. */
   plan?: string;
+  /** Answers the agent's questions (AskUserQuestion). Set by the app or terminal. */
+  onQuestion?: QuestionHandler;
+  /** Latest Claude plan usage (5-hour and weekly windows). */
+  usage: UsageSnapshot | null;
+  onUsage?: (s: UsageSnapshot) => void;
 
   constructor(
     readonly cfg: HarnessConfig,
@@ -95,6 +122,7 @@ export class Harness {
     this.mcpSkipped = buildExternalMcp(cfg).skipped;
     this.plugins = discoverPlugins(cfg.plugins_dir);
     this.verifyEnabled = cfg.verify.enabled;
+    this.usage = loadUsage(cfg);
     mkdirSync(join(cfg.root, ".harness", "scratch"), { recursive: true });
   }
 
@@ -127,7 +155,17 @@ export class Harness {
       effort: cfg.effort.main,
       systemPrompt: { type: "preset", preset: "claude_code", append: ORCHESTRATOR_PROMPT },
       agents: buildAgents(cfg),
-      mcpServers: { harness: local, ...buildExternalMcp(cfg).servers },
+      mcpServers: { harness: local, ...buildExternalMcp(cfg).servers, ...loadCustomServers(cfg) },
+      // Like Claude Code: the working model consults a stronger advisor on its own when it hits something hard.
+      ...(cfg.advisor.auto && { settings: { advisorModel: cfg.models.advisor } }),
+      // Only AskUserQuestion reaches this under bypassPermissions: the agent asking you something.
+      canUseTool: async (toolName: string, input: Record<string, unknown>) => {
+        if (toolName !== "AskUserQuestion") return { behavior: "allow" as const, updatedInput: input };
+        const questions = (input.questions ?? []) as AgentQuestion[];
+        if (!this.onQuestion) return { behavior: "deny" as const, message: "No one is available to answer questions right now. Make a sensible assumption, say what you assumed, and continue." };
+        const answers = await this.onQuestion(questions);
+        return { behavior: "allow" as const, updatedInput: { ...input, answers } };
+      },
       plugins: this.plugins,
       // user settings → ~/.claude/skills (gstack), project settings → .claude/
       settingSources: ["user", "project", "local"],
@@ -180,6 +218,7 @@ export class Harness {
   /** Run one prompt to completion, streaming messages to the hooks. */
   async run(prompt: string, opts: Partial<Options>, hooks: TurnHooks = {}): Promise<TurnResult> {
     const q = query({ prompt, options: this.options(opts) });
+    for (const name of loadDisabled(this.cfg)) await q.toggleMcpServer(name, false).catch(() => {});
     if (this.cfg.auth.subscription_only && !this.plan) {
       try {
         this.plan = assertClaudeSubscription(await q.accountInfo());
@@ -192,6 +231,12 @@ export class Harness {
     const res: TurnResult = { sessionId: "", text: "", isError: false, numTurns: 0, costUsd: 0, agentsUsed: [] };
     for await (const m of q) {
       if ("session_id" in m && m.session_id) res.sessionId = m.session_id;
+      if (m.type === "rate_limit_event") {
+        this.usage = toSnapshot(m.rate_limit_info);
+        saveUsage(this.cfg, this.usage);
+        this.onUsage?.(this.usage);
+      }
+      if (m.type === "assistant" && m.error === "rate_limit") res.rateLimited = true;
       if (m.type === "assistant") {
         for (const b of m.message.content) {
           if (b.type === "tool_use" && (b.name === "Agent" || b.name === "Task")) {
@@ -205,11 +250,26 @@ export class Harness {
         res.numTurns = m.num_turns;
         res.costUsd = m.total_cost_usd;
         res.text = m.subtype === "success" ? m.result : `(${m.subtype})`;
+        if (m.is_error && this.usage?.status === "rejected") res.rateLimited = true;
         if (m.subtype === "success") res.structured = m.structured_output;
       }
       hooks.onMessage?.(m);
     }
     return res;
+  }
+
+  /** Every MCP server and app the agents can reach, with live status. */
+  async connections(reconnect?: string): Promise<ConnectionInfo[]> {
+    const idle = (async function* () {
+      await new Promise(() => {});
+    })() as AsyncIterable<never>;
+    const q = query({ prompt: idle, options: this.options({ persistSession: false }) });
+    try {
+      if (reconnect) await q.reconnectMcpServer(reconnect).catch(() => {});
+      return await readConnections(q, this.cfg, Object.keys(buildExternalMcp(this.cfg).servers));
+    } finally {
+      q.close();
+    }
   }
 
   /**

@@ -30,6 +30,8 @@ export interface HarnessConfig {
   mcp: Record<string, boolean>;
   auth: { subscription_only: boolean };
   memory: { claude_mem: string[]; hindsight: string[] };
+  advisor: { auto: boolean };
+  limits: { fallback_to_gpt: boolean; warn_at: number };
   subagents_file: string;
   root: string;
 }
@@ -60,6 +62,8 @@ export function loadConfig(root = process.env.HARNESS_ROOT ?? process.cwd()): Ha
   cfg.models.image_fallback ??= cfg.models.gui;
   cfg.models.gpt ??= [cfg.models.gui, cfg.models.image];
   cfg.memory ??= { claude_mem: ["http://localhost:37701", "http://localhost:37777"], hindsight: ["http://localhost:9999", "http://localhost:8888"] };
+  cfg.advisor ??= { auto: true };
+  cfg.limits ??= { fallback_to_gpt: true, warn_at: 0.8 };
   cfg.subagents_file = resolve(root, cfg.subagents_file ?? "subagents.yaml");
   // Escape hatch for CI/testing machines that only have API credentials.
   if (process.env.HARNESS_ALLOW_API === "1") cfg.auth.subscription_only = false;
