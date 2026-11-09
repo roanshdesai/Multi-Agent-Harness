@@ -58,6 +58,18 @@ export class Host {
     this.usage = loadUsage(cfg);
   }
 
+  /** When plan usage was last read on demand (ms). */
+  usageReadAt = 0;
+
+  /** Re-read Claude plan usage now (not only when a message runs). */
+  async refreshUsage(): Promise<UsageSnapshot | null> {
+    const h = this.tabs.values().next().value?.harness ?? new Harness(this.cfg, this.askFor(0));
+    const snap = await h.refreshUsage().catch(() => null);
+    this.usageReadAt = Date.now();
+    if (snap && (!this.usage || snap.at >= this.usage.at)) this.usage = snap;
+    return this.usage;
+  }
+
   /** Claude is out of usage right now (so new work goes to GPT). */
   get claudeLimited() {
     return this.cfg.limits.fallback_to_gpt && isExhausted(this.usage);

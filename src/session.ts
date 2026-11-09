@@ -21,7 +21,7 @@ import { pushApprovalHook, stuckDetector, type Ask } from "./guards.js";
 import { assertClaudeSubscription, subscriptionEnv } from "./subscription.js";
 import { HARNESS_COMMANDS, mergeCommands, type CommandInfo } from "./commands.js";
 import { loadCustomServers, loadDisabled, readConnections, type ConnectionInfo } from "./connections.js";
-import { toSnapshot, markWorking, saveUsage, loadUsage, isExhausted, type UsageSnapshot } from "./usage.js";
+import { toSnapshot, markWorking, fromPlanUsage, saveUsage, loadUsage, isExhausted, type UsageSnapshot } from "./usage.js";
 
 /** A pushable stream of user messages, so a running task can take corrections (/change). */
 export function inputChannel() {
@@ -191,6 +191,36 @@ export class Harness {
     mkdirSync(join(cfg.root, ".harness", "scratch"), { recursive: true });
   }
 
+  /** Claude models your plan offers (from Claude Code), for the model pickers. */
+  availableModels: { value: string; displayName: string }[] = [];
+
+  /** Read plan usage now (not only when a message runs). Uses the SDK's experimental usage call when present. */
+  private async readUsage(q: ReturnType<typeof query>) {
+    const fn = (q as unknown as Record<string, unknown>).usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET as
+      | ((o: { skipBehaviors: boolean }) => Promise<Parameters<typeof fromPlanUsage>[0]>)
+      | undefined;
+    if (typeof fn !== "function") return;
+    const snap = fromPlanUsage(await fn.call(q, { skipBehaviors: true }), this.cfg.limits.warn_at);
+    if (!snap) return;
+    this.usage = snap;
+    saveUsage(this.cfg, snap);
+    this.onUsage?.(snap);
+  }
+
+  /** Fetch plan usage on demand. Returns the latest snapshot (or the saved one if the call isn't available). */
+  async refreshUsage(): Promise<UsageSnapshot | null> {
+    const idle = (async function* () {
+      await new Promise(() => {});
+    })() as AsyncIterable<never>;
+    const q = query({ prompt: idle, options: this.options({ persistSession: false }) });
+    try {
+      await this.readUsage(q).catch(() => undefined);
+    } finally {
+      q.close();
+    }
+    return this.usage;
+  }
+
   get mainModel() {
     return this.modelOverride ?? this.cfg.models.main;
   }
@@ -272,6 +302,17 @@ export class Harness {
       } catch {
         /* keep the built-in list */
       }
+      try {
+        const seen = new Map<string, { value: string; displayName: string }>();
+        for (const m of await q.supportedModels()) {
+          const value = m.resolvedModel ?? m.value;
+          if (!seen.has(value)) seen.set(value, { value, displayName: m.displayName });
+        }
+        this.availableModels = [...seen.values()];
+      } catch {
+        /* the picker falls back to the models in the config */
+      }
+      await this.readUsage(q).catch(() => undefined);
       if (!this.cfg.auth.subscription_only) return undefined;
       this.plan = assertClaudeSubscription(await q.accountInfo());
       return this.plan;

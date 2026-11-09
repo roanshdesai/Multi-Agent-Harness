@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, readdirSync
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { loadConfig, type HarnessConfig } from "../config.js";
+import { loadConfig, saveModels, MODEL_ROLES, type HarnessConfig } from "../config.js";
 import { Harness } from "../session.js";
 import { Host } from "../host.js";
 import { startBridge } from "../bridge.js";
@@ -111,6 +111,7 @@ host.listen((msg) => {
 
 // One subscription + command check per launch, shared by every tab.
 let auth: { plan?: string; error?: string } | null = null;
+let availableModels: { value: string; displayName: string }[] = [];
 async function ensureAuth() {
   if (auth) return auth;
   const h = new Harness(cfg, askFor(0));
@@ -121,6 +122,11 @@ async function ensureAuth() {
   }
   host.plan = auth.plan;
   host.commands = h.commands;
+  availableModels = h.availableModels;
+  if (h.usage && (!host.usage || h.usage.at >= host.usage.at)) {
+    host.usage = h.usage;
+    host.usageReadAt = Date.now();
+  }
   return auth;
 }
 
@@ -198,6 +204,8 @@ ipcMain.handle("init", async (e) => {
     subscriptionOnly: cfg.auth.subscription_only,
     codex: codexStatus(cfg.root),
     models: cfg.models,
+    availableModels,
+    usageRefreshMinutes: cfg.limits.refresh_minutes ?? 0,
     workspace: process.cwd(),
     tabs,
     mcpSkipped: new Harness(cfg, askFor(0)).mcpSkipped,
@@ -247,7 +255,15 @@ ipcMain.handle("open-design-library", () => shell.openPath(cfg.design_library));
 ipcMain.handle("open-subagents-file", () => shell.openPath(cfg.subagents_file));
 
 // Usage and connections
-ipcMain.handle("usage", () => ({ usage: host.usage, limited: host.claudeLimited, gpt: cfg.models.gpt[0], codex: codexStatus(cfg.root) }));
+// Plan usage: re-read on demand when asked to, or when the last read is older than refresh_minutes.
+ipcMain.handle("usage", async (_e, force?: boolean) => {
+  const every = (cfg.limits.refresh_minutes ?? 0) * 60_000;
+  if (force || !host.usageReadAt || (every && Date.now() - host.usageReadAt > every)) await host.refreshUsage();
+  return { usage: host.usage, limited: host.claudeLimited, gpt: cfg.models.gpt[0], codex: codexStatus(cfg.root) };
+});
+// Models: choose the model for each role and what the pickers offer; saved to harness.config.yaml.
+ipcMain.handle("models", () => ({ models: cfg.models, available: availableModels, roles: MODEL_ROLES }));
+ipcMain.handle("models-save", (_e, changes: Partial<HarnessConfig["models"]>) => saveModels(cfg, changes));
 ipcMain.handle("connections", (_e, reconnect?: string) => host.connections(reconnect));
 ipcMain.handle("mcp-toggle", (_e, name: string, enabled: boolean) => setDisabled(cfg, name, !enabled));
 ipcMain.handle("mcp-add", (_e, name: string, spec: string) => addServer(cfg, name, spec));

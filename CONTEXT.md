@@ -21,7 +21,7 @@ One orchestrator plans and delegates to specialists on different models.
 | Images | `gpt-6.1-sol` via Codex (falls back to `gpt-6-astra`) | `src/tools/gpt.ts` |
 | GPT chat tabs | `gpt-6-astra`, `gpt-6.1-sol` | `src/gpt-chat.ts` + `src/codex.ts` |
 
-All models are set in `harness.config.yaml`.
+All models are set in `harness.config.yaml`, and can be changed in the app with `/models` (or Edit models… in the picker), which writes back to the file.
 
 ## Hard rules (the owner's preferences)
 
@@ -65,7 +65,8 @@ test/core.test.ts    Unit tests (node:test); test/fixtures/fake-codex.mjs stands
 Key SDK facts this project relies on (Agent SDK v0.3.x):
 - `query({ prompt: AsyncIterable })` plus pushing a user message with `priority: "next"` lets a running task take a correction without stopping (`/change`).
 - `q.getContextUsage()` returns `gridRows`, the same squares Claude Code's `/context` draws.
-- `rate_limit_event` carries `unifiedWindows` (five_hour/seven_day utilization). There's no on-demand usage call.
+- `rate_limit_event` carries `unifiedWindows` (five_hour/seven_day utilization). Plan usage is also read on demand with `q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })` (guarded: if it disappears, usage comes only from messages).
+- `q.supportedModels()` lists the Claude models the plan offers; the model pickers use it, so no model list is hardcoded.
 - `canUseTool` still fires for `AskUserQuestion` under `bypassPermissions`. The SDK prints a "shadowed" warning, which is suppressed in `session.ts`.
 - `q.mcpServerStatus()`, `toggleMcpServer()`, `reconnectMcpServer()` are used for the connections panel.
 - `settings: { advisorModel }` enables the server-side advisor tool.
@@ -78,7 +79,7 @@ Tabs (parallel tasks) · live terminal link · `/btw` · `/fork` (new window, or
 
 ```bash
 npm install
-npx tsc --noEmit && npm test          # 22 unit tests
+npx tsc --noEmit && npm test          # 24 unit tests
 HARNESS_ALLOW_API=1 npm start         # only in containers without a subscription
 ```
 
@@ -102,6 +103,8 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 None known.
 
 Fixed in the last review:
+- Claude usage showed 0 / nothing until the first message: it's now read from the plan at start, when Usage opens, and every `limits.refresh_minutes`
+- leftover hardcoded defaults (image model, memory ports) removed from `src/config.ts`
 - the Claude meter drew a full bar before any usage data (read as "out of usage"); it now starts empty
 - adding an MCP server from the app: re-adding a turned-off server stays off, errors were hidden, and there was no way to sign in from the app
 - "Claude usage is over" shown when it wasn't: a stale saved "rejected" snapshot (no reset time), or an extra-usage / single-model refusal, counted as out. Now it needs a future reset and a blocked plan window, and a successful reply clears it

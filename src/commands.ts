@@ -44,6 +44,7 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
   { name: "/usage", description: "Claude plan usage (5-hour and weekly) and ChatGPT status", group: "Harness" },
   { name: "/connections", description: "MCP servers and apps: status, reconnect, turn off, add", group: "Harness", aliases: ["/mcp", "/apps"] },
   { name: "/status", description: "Plans, models, integrations, plugins", group: "Harness" },
+  { name: "/models", description: "Choose the model for each role and what the model picker offers", group: "Harness" },
   { name: "/model", args: "[id]", description: "Change this tab's model, Claude or GPT", group: "Harness" },
   { name: "/verify", args: "on | off", description: "Turn the Fable verifier on or off", group: "Harness" },
   { name: "/eval", args: "[filter]", description: "Run the eval suite", group: "Harness" },

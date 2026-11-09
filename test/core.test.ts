@@ -378,6 +378,34 @@ test("chats: listed from every folder; opening one runs it in its own folder", a
   delete process.env.HARNESS_CODEX_BIN;
 });
 
+test("usage on demand: plan windows from the SDK usage call", async () => {
+  const { fromPlanUsage, isExhausted } = await import("../src/usage.js");
+  const soon = new Date(Date.now() + 3600_000).toISOString();
+  const snap = fromPlanUsage({ rate_limits_available: true, rate_limits: { five_hour: { utilization: 0, resets_at: soon }, seven_day: { utilization: 42, resets_at: soon }, extra_usage: { is_enabled: false } } as any }, 0.8)!;
+  assert.deepEqual(snap.windows.map((w) => [w.key, w.utilization]), [["five_hour", 0], ["seven_day", 0.42]]);
+  assert.equal(isExhausted(snap), false);
+  const out = fromPlanUsage({ rate_limits_available: true, rate_limits: { five_hour: { utilization: 100, resets_at: soon } } }, 0.8)!;
+  assert.equal(isExhausted(out), true);
+  assert.equal(isExhausted(fromPlanUsage({ rate_limits_available: true, rate_limits: { seven_day_opus: { utilization: 100, resets_at: soon } } }, 0.8)), false);
+  assert.equal(fromPlanUsage({ rate_limits_available: false, rate_limits: null }), null); // API key: nothing to show
+});
+
+test("models: saved back to the config file, comments kept, applied at once", async () => {
+  const { loadConfig, saveModels } = await import("../src/config.js");
+  const { readFileSync, copyFileSync } = await import("node:fs");
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  copyFileSync(join(process.cwd(), "harness.config.yaml"), join(dir, "harness.config.yaml"));
+  const cfg = loadConfig(dir);
+  saveModels(cfg, { coder: "claude-test-coder", gpt: ["gpt-a", "gpt-b"], claude: [] });
+  assert.equal(cfg.models.coder, "claude-test-coder");
+  const again = loadConfig(dir);
+  assert.equal(again.models.coder, "claude-test-coder");
+  assert.deepEqual(again.models.gpt, ["gpt-a", "gpt-b"]);
+  assert.match(readFileSync(join(dir, "harness.config.yaml"), "utf8"), /# orchestrator/); // comments survive
+  assert.throws(() => saveModels(cfg, { main: " " }), /Pick a model/);
+  assert.throws(() => saveModels(cfg, { gpt: [] }), /at least one GPT/);
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

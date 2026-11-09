@@ -704,8 +704,12 @@ function buildModelSelect() {
   sel.textContent = "";
   const claude = el("optgroup");
   claude.label = "Claude · your Claude plan";
-  for (const m of [...new Set([info.models.main, info.models.advisor, info.models.worker])]) {
-    const o = el("option", "", shortModel(m));
+  // Your list from /models; if empty, everything your plan offers; always the current main model.
+  const names = new Map((info.availableModels ?? []).map((m) => [m.value, m.displayName]));
+  const mine = info.models.claude?.length ? info.models.claude : [...names.keys()];
+  const curModel = cur()?.info?.model;
+  for (const m of [...new Set([info.models.main, ...mine, ...(curModel && !isGpt(curModel) ? [curModel] : [])])]) {
+    const o = el("option", "", names.get(m) ?? shortModel(m));
     o.value = m;
     claude.appendChild(o);
   }
@@ -716,11 +720,104 @@ function buildModelSelect() {
     o.value = m;
     gpt.appendChild(o);
   }
-  sel.append(claude, gpt);
+  const more = el("optgroup");
+  more.label = "Settings";
+  const edit = el("option", "", "Edit models…");
+  edit.value = "__edit_models";
+  more.appendChild(edit);
+  sel.append(claude, gpt, more);
+  if (curModel) sel.value = curModel;
+}
+
+// ── /models: pick the model for each role ─────────────────────────────────
+const ROLE_LABELS = {
+  main: ["Orchestrator", "Plans and delegates every task"],
+  advisor: ["Advisor", "Second opinion when the work gets hard"],
+  coder: ["Coder", "All coding work"],
+  worker: ["Researcher", "Research, scraping, general tasks"],
+  triage: ["Summarizer", "Condenses long pages and logs"],
+  video: ["Video", "Video work"],
+  verifier: ["Verifier", "Checks delegated work"],
+  gui: ["UI tester (GPT)", "Runs browser tests through Codex"],
+  image: ["Images (GPT)", "Image generation through Codex"],
+  image_fallback: ["Images fallback", "Used if the image model is unavailable"],
+};
+async function showModels() {
+  const data = await api.models();
+  const box = el("div");
+  const all = el("datalist");
+  all.id = "modelOptions";
+  for (const m of data.available) {
+    const o = el("option");
+    o.value = m.value;
+    o.label = m.displayName;
+    all.appendChild(o);
+  }
+  for (const m of data.models.gpt ?? []) {
+    const o = el("option");
+    o.value = m;
+    all.appendChild(o);
+  }
+  box.appendChild(all);
+  box.appendChild(el("p", "muted", data.available.length ? `Pick from the ${data.available.length} Claude models your plan offers, or type any model id (GPT ids for the Codex roles).` : "Type any model id. Your plan's Claude models show here once you're signed in."));
+  box.appendChild(el("h4", "", "Roles"));
+  const inputs = {};
+  const grid = el("div", "model-grid");
+  for (const role of data.roles) {
+    const [label, hint] = ROLE_LABELS[role] ?? [role, ""];
+    const lab = el("label", "mg-label");
+    lab.append(el("span", "", label), el("small", "", hint));
+    const inp = el("input", "input mono");
+    inp.setAttribute("list", "modelOptions");
+    inp.value = data.models[role] ?? "";
+    inputs[role] = inp;
+    grid.append(lab, inp);
+  }
+  box.appendChild(grid);
+  box.appendChild(el("h4", "", "Model picker"));
+  const lists = el("div", "model-grid");
+  const listRow = (key, label, hint) => {
+    const lab = el("label", "mg-label");
+    lab.append(el("span", "", label), el("small", "", hint));
+    const inp = el("input", "input mono");
+    inp.value = (data.models[key] ?? []).join(", ");
+    inputs[key] = inp;
+    lists.append(lab, inp);
+  };
+  listRow("claude", "Claude models", "Comma-separated. Empty: everything your plan offers");
+  listRow("gpt", "GPT models", "Comma-separated, as Codex names them");
+  listRow("fallback", "Fallback chain", "Tried in order if a model is overloaded");
+  box.appendChild(lists);
+  const msg = el("p", "muted");
+  const acts = el("div", "row-actions");
+  acts.style.marginTop = "14px";
+  const save = el("button", "btn primary", "Save");
+  save.onclick = async () => {
+    const changes = {};
+    for (const [k, inp] of Object.entries(inputs)) changes[k] = ["claude", "gpt", "fallback"].includes(k) ? inp.value.split(",").map((x) => x.trim()).filter(Boolean) : inp.value.trim();
+    save.disabled = true;
+    try {
+      info.models = await api.saveModels(changes);
+      buildModelSelect();
+      refreshWelcomes();
+      refreshAgents();
+      msg.textContent = "Saved to harness.config.yaml. New messages use these models.";
+    } catch (err) {
+      msg.textContent = String(err.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+    }
+    save.disabled = false;
+  };
+  acts.append(save);
+  box.append(acts, msg);
+  modal("Models", box);
 }
 $("modelSelect").onchange = async (e) => {
   const s = cur();
   const model = e.target.value;
+  if (model === "__edit_models") {
+    e.target.value = s?.info?.model ?? info.models.main;
+    return showModels();
+  }
   const r = await api.setModel(s.id, model);
   if (r.newTab) {
     const t = ensureChatTab({ id: r.tabId, kind: isGpt(model) ? "gpt" : "claude", model, title: "New chat", busy: false, verify: true, sessionId: null });
@@ -916,8 +1013,8 @@ async function refreshConnections(reconnect) {
   if (pane === "connections") renderPane();
   return connState;
 }
-async function refreshUsage() {
-  usageState = await api.usage();
+async function refreshUsage(force) {
+  usageState = await api.usage(force);
   renderStatus();
 }
 async function refreshAgents() {
@@ -1157,11 +1254,11 @@ async function showContext() {
 }
 
 async function showUsage() {
-  await refreshUsage();
+  await refreshUsage(true);
   const u = usageState;
   const box = el("div");
   box.appendChild(el("h4", "", "Claude plan"));
-  if (!u.usage?.windows?.length) box.appendChild(el("p", "muted", "No usage reported yet. It shows up after your first message."));
+  if (!u.usage?.windows?.length) box.appendChild(el("p", "muted", "No usage from your Claude plan yet. It shows once Claude reports it (at start, or after your first message)."));
   for (const w of u.usage?.windows ?? []) {
     const pct = w.utilization == null ? null : Math.round(w.utilization * 100);
     const m = el("div", `meter${pct >= 100 || w.status === "rejected" ? " full" : pct >= 80 ? " warn" : ""}`);
@@ -1388,6 +1485,10 @@ function showStatus() {
   row("ChatGPT (Codex)", info.codex.detail);
   for (const [k, v] of Object.entries(info.models)) row(k, Array.isArray(v) ? v.join(", ") : v);
   row("Folder", info.workspace);
+  const mb = el("button", "btn sm", "Edit models");
+  mb.onclick = () => showModels();
+  dl.append(el("dt", "", ""), Object.assign(el("dd"), {}));
+  dl.lastChild.appendChild(mb);
   row("Plugins", info.plugins.join(", ") || "none (run npm run setup)");
   row("UI links", `${info.designCount} links`);
   row("Terminal link", "Run npm start while this app is open to share its tabs");
@@ -1572,6 +1673,8 @@ async function submit(mode = "send") {
       return showConnections();
     case "/status":
       return showStatus();
+    case "/models":
+      return showModels();
     case "/help":
       return showHelp();
     case "/docs":
@@ -1669,6 +1772,8 @@ async function start() {
   for (const t of info.tabs) ensureChatTab(t);
   activate(info.tabs[info.tabs.length - 1].id);
   await Promise.all([refreshDocs(), refreshMemory(), refreshUsage(), refreshAgents()]);
+  // Re-read plan usage on the interval set in harness.config.yaml (limits.refresh_minutes).
+  if (info.usageRefreshMinutes > 0) setInterval(() => refreshUsage(), info.usageRefreshMinutes * 60_000);
   refreshWelcomes();
   renderPane();
   autoSize();

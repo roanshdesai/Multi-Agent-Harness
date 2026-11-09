@@ -51,6 +51,34 @@ export function toSnapshot(info: SDKRateLimitInfo): UsageSnapshot {
   };
 }
 
+/** The plan-usage reply from the SDK's usage call (windows are 0-100). */
+export interface PlanUsageReply {
+  rate_limits_available?: boolean;
+  rate_limits?: Record<string, unknown> | null;
+}
+
+/** Turn the SDK's on-demand plan usage into a snapshot. Null when the plan has no limits to show. */
+export function fromPlanUsage(r: PlanUsageReply | null | undefined, warnAt = 1): UsageSnapshot | null {
+  if (!r?.rate_limits_available || !r.rate_limits) return null;
+  const windows: UsageWindow[] = [];
+  for (const [key, v] of Object.entries(r.rate_limits)) {
+    const w = v as { utilization?: number | null; resets_at?: string | null } | null;
+    if (!w || typeof w !== "object" || Array.isArray(w) || !("utilization" in w)) continue;
+    const u = typeof w.utilization === "number" ? w.utilization / 100 : null;
+    windows.push({ key, label: LABELS[key] ?? key, utilization: u, resetsAt: w.resets_at ? Date.parse(w.resets_at) : null, status: u !== null && u >= 1 ? "rejected" : "allowed" });
+  }
+  if (!windows.length) return null;
+  const blocked = windows.filter((w) => w.status === "rejected" && w.resetsAt && !/overage|_opus$|_sonnet$|oauth_apps/.test(w.key));
+  const warn = windows.some((w) => (w.utilization ?? 0) >= warnAt);
+  return {
+    at: Date.now(),
+    status: blocked.length ? "rejected" : warn ? "allowed_warning" : "allowed",
+    windows,
+    resetsAt: blocked.length ? Math.max(...blocked.map((w) => w.resetsAt!)) : null,
+    overage: null,
+  };
+}
+
 /** True when Claude can't take more requests right now (and extra usage isn't available). */
 // Windows that only cover extra (paid) usage or one model: being out of these isn't being out of Claude.
 const PARTIAL = /overage|_opus$|_sonnet$/;
