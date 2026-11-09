@@ -15,6 +15,7 @@ import { buildAgents } from "./agents.js";
 import { designPrompt, normalize, SUBAGENT_SCHEMA, type CustomSubagent } from "./subagents.js";
 import { buildExternalMcp } from "./mcp.js";
 import { designLibraryTool } from "./tools/design-library.js";
+import { computerUseTool } from "./tools/computer.js";
 import { guiTestTool } from "./tools/gui-test.js";
 import { askGptTool, imageTool } from "./tools/gpt.js";
 import { pushApprovalHook, stuckDetector, type Ask } from "./guards.js";
@@ -108,6 +109,7 @@ Delegate with the Agent tool:
 - Long pages, logs or transcripts → "summarizer" before you read them.
 - UI/visual design → "designer". It must ground work in the design_library tool.
 - Testing a UI in a browser → "gui-tester".
+- Operating Mac apps or the screen (click, type, read what is on screen) → the computer_use tool (GPT through Codex). Use the Claude in Chrome tools (if connected) for tasks in the user's own browser.
 - Images (generate, edit, review screenshots) → "image" (runs on GPT through Codex).
 - Video → "video".
 - The user's own subagents (from /subagents) are listed with the Agent tool. Prefer them when their description fits.
@@ -235,6 +237,7 @@ export class Harness {
       tools: [
         designLibraryTool(cfg.design_library),
         guiTestTool(cfg.models.gui, cfg.root),
+        computerUseTool(cfg),
         askGptTool(cfg.root, cfg.models.gpt),
         imageTool(cfg.root, cfg.models.image, cfg.models.image_fallback),
       ],
@@ -244,6 +247,8 @@ export class Harness {
       cwd: this.cwd,
       // Subscription-only: strip every API-key credential so billing can't fall back to the API.
       ...(cfg.auth.subscription_only && { env: subscriptionEnv() }),
+      // Claude in Chrome: Claude Code connects to the browser extension (claude --chrome).
+      ...(cfg.extensions?.claude_in_chrome && { extraArgs: { chrome: null } }),
       // Packaged desktop app: the engine binary lives outside the asar archive.
       ...(process.env.HARNESS_CLAUDE_BIN && { pathToClaudeCodeExecutable: process.env.HARNESS_CLAUDE_BIN }),
       model: this.mainModel,

@@ -18,6 +18,7 @@ import type { TabInfo } from "./host.js";
 import type { AgentQuestion } from "./session.js";
 import { describeUsage, isExhausted, formatReset } from "./usage.js";
 import { readCodexUsage } from "./codex-usage.js";
+import { runComputerUse, COMPUTER_TEST_PROMPT } from "./tools/computer.js";
 import { parseCaffeinate, describeCaffeinate, type CaffeinateStatus } from "./caffeinate.js";
 import { spawn as spawnChild, spawnSync as spawnSyncChild, type ChildProcess } from "node:child_process";
 import { saveCustomServer, removeCustomServer, setDisabled, parseServerSpec } from "./connections.js";
@@ -555,6 +556,14 @@ async function command(line: string): Promise<boolean> {
       harness.verifyEnabled = arg !== "off";
       console.log(`Verifier ${harness.verifyEnabled ? "on" : "off"}.`);
       return true;
+    case "/computer": {
+      if (arg.trim().toLowerCase() !== "test") return false;
+      console.log(c.dim(`${cfg.models.gui} is taking a screenshot (computer use test)…`));
+      const r = await runComputerUse(cfg, COMPUTER_TEST_PROMPT, { timeoutMinutes: 5 });
+      console.log((r.ok ? c.green("Computer use works. ") : c.red("Computer use didn't work. ")) + r.text);
+      console.log(c.dim(`Log: ${r.dir}`));
+      return true;
+    }
     case "/caffeinate":
     case "/caffinate": {
       try {

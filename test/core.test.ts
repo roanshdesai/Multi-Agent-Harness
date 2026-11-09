@@ -589,6 +589,32 @@ test("/caffeinate: parses toggle, durations, display and off", async () => {
   assert.match(describeCaffeinate({ on: false, display: false, until: null }), /can sleep/);
 });
 
+test("computer use: only allowed apps, run through Codex with the UI model", async () => {
+  const { computerArgs, runComputerUse, COMPUTER_TEST_PROMPT } = await import("../src/tools/computer.js");
+  const { loadConfig } = await import("../src/config.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  cfg.computer_use = { default_app_access: "deny", apps: { "com.google.Chrome": "allow", "bad id; rm -rf": "allow" }, browser: { access: "allow", uploads: "deny" } };
+  const a = computerArgs(cfg).join(" ");
+  assert.match(a, /computer_use\.default_app_access="deny"/);
+  assert.match(a, /computer_use\.macos\.bundle_ids\."com\.google\.Chrome"="allow"/);
+  assert.doesNotMatch(a, /rm -rf/); // only bundle ids get through
+  assert.match(a, /browser_use\.default_origin_policy\.uploads="deny"/);
+  cfg.computer_use = {};
+  assert.match(computerArgs(cfg).join(" "), /default_app_access="deny"/); // deny unless allowed
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  try {
+    const r = await runComputerUse(cfg, COMPUTER_TEST_PROMPT, { timeoutMinutes: 1 });
+    assert.ok(r.ok, r.text);
+    assert.match(r.text, new RegExp(`echo\\(${cfg.models.gui}\\): This is a permissions check`));
+    const { engine } = { engine: await import("../src/engine.js") };
+    assert.equal(engine.expandShortcut("/computer", "test"), null);
+    assert.match(engine.expandShortcut("/computer", "open Safari")!, /computer_use tool/);
+  } finally {
+    delete process.env.HARNESS_CODEX_BIN;
+  }
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

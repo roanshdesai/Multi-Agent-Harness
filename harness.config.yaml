@@ -43,6 +43,25 @@ limits:
   warn_at: 0.8   # show a heads-up when a usage window passes 80%
   refresh_minutes: 5   # re-read plan usage this often (0 = only at start and when you open Usage)
 
+extensions:
+  # Claude agents use your Chrome through the Claude in Chrome extension
+  # (install it from the Chrome Web Store and sign in with your Claude account).
+  claude_in_chrome: true
+
+computer_use:
+  # GPT (models.gui) operates Mac apps and the screen through Codex.
+  # Only apps listed as allow can be touched; everything else is denied.
+  # macOS asks once for Screen Recording and Accessibility permission.
+  default_app_access: deny
+  apps:
+    com.google.Chrome: allow
+    com.apple.Safari: allow
+  browser:            # Codex's browser use (its own browser or your browser via OpenAI's extension)
+    access: allow
+    downloads: deny
+    uploads: deny
+  timeout_minutes: 15
+
 remote:
   # /remote: an MCP server other apps (e.g. Pally) use to control this app.
   # Off until you turn it on in the app; only reachable on this computer

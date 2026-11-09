@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("harness", {
   codexLogin: () => invoke("codex-login"),
   handoff: (tabId) => invoke("handoff", tabId),
   caffeinate: (arg) => invoke("caffeinate", arg),
+  computerTest: () => invoke("computer-test"),
   onCaffeinate: on("caffeinate"),
   remoteStatus: () => invoke("remote-status"),
   remoteStart: () => invoke("remote-start"),

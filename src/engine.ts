@@ -139,6 +139,9 @@ export function expandShortcut(cmd: string, arg: string): string | null {
       return `Have the "gui-tester" agent test this: ${arg}`;
     case "/video":
       return `Delegate to the "video" agent: ${arg}`;
+    case "/computer":
+      if (!arg.trim() || arg.trim().toLowerCase() === "test") return null; // the apps run the test directly
+      return `Use the computer_use tool (GPT through Codex) for this, then report what happened: ${arg}`;
     case "/image":
       return `Delegate to the "image" agent: ${arg}`;
     case "/remember":

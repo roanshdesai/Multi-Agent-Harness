@@ -60,7 +60,7 @@ src/subagents.ts     /subagents storage; prompt for the advisor to design subage
 src/connections.ts   MCP servers & apps: live status, add (mcp-servers.json), turn off
 src/usage.ts         Claude plan usage windows (5-hour/weekly) from rate_limit_event; exhaustion rule
 src/docs.ts          Documents pane: listing, PRD detection, summaries (cached in .harness)
-src/tools/           design_library, gui_test, ask_gpt, image
+src/tools/           design_library, gui_test, ask_gpt, image, computer_use (Codex computer/browser use with models.gui; apps allow-listed by bundle id under computer_use)
 src/guards.ts        Push approval hook, stuck detector
 src/mcp.ts           Harness MCP servers (GitHub, Slack, Outlook, Hindsight, Firecrawl, Exa, Context7, Playwright)
 src/eval.ts, evals/  Eval runner and tasks
@@ -78,13 +78,13 @@ Key SDK facts this project relies on (Agent SDK v0.3.x):
 
 ## Features (all shipped)
 
-`/caffeinate [off|30m|2h|display]` (app: Electron powerSaveBlocker + title-bar chip; terminal: macOS caffeinate -i -w <pid>, systemd-inhibit on Linux) · `/remote` (control the app from Pally or any MCP client; off by default, push approvals stay local) · Live "working…" line under the thread (Thinking / Running <cmd> / <agent> is working / Verifying…, with a timer) · Context hand-off (past `context.handoff_at`, default 80%, a chat writes `.harness/handoffs/<session>/context.md` on a throwaway fork and offers "Continue in a new chat", which seeds a new tab with it; `/handoff` any time; Claude chats only) · Home-screen token usage (All / Claude / ChatGPT tabs: totals, streaks, top model, year calendar grid, book comparison) · Tabs (parallel tasks) · `@app` mentions (type @ in the composer to name a connected MCP server, e.g. @pally, @slack; the model is told to use that server's `mcp__<name>__*` tools and may call them itself) · live terminal link · `/btw` · `/fork` (new window, or a new terminal window from the CLI) · `/change` (⌘Enter) · verifier · automatic advisor · `/subagents` (advisor designs, you approve) · Claude/GPT model picker per tab · image agent · `/usage` + automatic switch to GPT when Claude is out · agent questions (answer in app or terminal) · MCP servers & apps panel (`/connections`, `/mcp`, `/apps`) · Documents pane with PRD summaries (`/docs`, `/summarize`) · `/context` grid · memory viewers (claude-mem, Hindsight) · UI links library · evals · original UI (dark graphite palette with one signal accent, sans + mono type, dense layout, log-style agent timeline, instrument panel) · add MCP servers from the app (URLs go into Claude Code's user list so sign-in works; Sign in opens `claude /mcp` in a terminal) · chats from every folder, opened in their own folder; Cloud sessions link to claude.ai/code.
+Claude in Chrome (`extensions.claude_in_chrome` passes `--chrome` to Claude Code) · `/computer test | <task>` (GPT computer use through Codex) · `/caffeinate [off|30m|2h|display]` (app: Electron powerSaveBlocker + title-bar chip; terminal: macOS caffeinate -i -w <pid>, systemd-inhibit on Linux) · `/remote` (control the app from Pally or any MCP client; off by default, push approvals stay local) · Live "working…" line under the thread (Thinking / Running <cmd> / <agent> is working / Verifying…, with a timer) · Context hand-off (past `context.handoff_at`, default 80%, a chat writes `.harness/handoffs/<session>/context.md` on a throwaway fork and offers "Continue in a new chat", which seeds a new tab with it; `/handoff` any time; Claude chats only) · Home-screen token usage (All / Claude / ChatGPT tabs: totals, streaks, top model, year calendar grid, book comparison) · Tabs (parallel tasks) · `@app` mentions (type @ in the composer to name a connected MCP server, e.g. @pally, @slack; the model is told to use that server's `mcp__<name>__*` tools and may call them itself) · live terminal link · `/btw` · `/fork` (new window, or a new terminal window from the CLI) · `/change` (⌘Enter) · verifier · automatic advisor · `/subagents` (advisor designs, you approve) · Claude/GPT model picker per tab · image agent · `/usage` + automatic switch to GPT when Claude is out · agent questions (answer in app or terminal) · MCP servers & apps panel (`/connections`, `/mcp`, `/apps`) · Documents pane with PRD summaries (`/docs`, `/summarize`) · `/context` grid · memory viewers (claude-mem, Hindsight) · UI links library · evals · original UI (dark graphite palette with one signal accent, sans + mono type, dense layout, log-style agent timeline, instrument panel) · add MCP servers from the app (URLs go into Claude Code's user list so sign-in works; Sign in opens `claude /mcp` in a terminal) · chats from every folder, opened in their own folder; Cloud sessions link to claude.ai/code.
 
 ## How to test
 
 ```bash
 npm install
-npx tsc --noEmit && npm test          # 30 unit tests
+npx tsc --noEmit && npm test          # 31 unit tests
 HARNESS_ALLOW_API=1 npm start         # only in containers without a subscription
 ```
 
@@ -103,6 +103,8 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 - The Mac `.dmg` and Windows installer. A Linux packaged build was tested.
 - Pally sign-in through the app's Sign in button (`claude /mcp`). The container can't reach agent.pally.com.
 - Listing cloud (claude.ai/code) sessions inside the app: the SDK has no API for it, so the Chats pane links out.
+- Computer use with real GPT-6 Astra on a Mac (needs Screen Recording + Accessibility for the app/terminal) and Codex browser use through OpenAI's extension. Tested only with the fake Codex.
+- Claude in Chrome with the real extension (the claude-in-chrome server connects; the browser side needs the extension signed in).
 - /remote from Pally: depends on Pally accepting a custom MCP server URL (pally.com wasn't reachable from the container) and on cloudflared being installed for the public link.
 - Starting claude-mem with `npx claude-mem start` (the command is from its README; its docs site wasn't reachable from the container) and Hindsight via Docker on a Mac.
 - The Hindsight web UI port. 9999 is assumed; claude-mem is checked on 37701, then 37777.

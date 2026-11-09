@@ -2132,6 +2132,19 @@ async function submit(mode = "send") {
       return showUsage();
     case "/connections":
       return showConnections();
+    case "/computer":
+      if (!arg) return addNote(s, "Usage: /computer test (checks GPT can see the screen) or /computer <task>.");
+      if (arg.trim().toLowerCase() === "test") {
+        setWorking(s, `${shortModel(info.models.gui)} is taking a screenshot (computer use test)`);
+        return api
+          .computerTest()
+          .then((r) => {
+            stopWorking(s);
+            addNote(s, `${r.ok ? "Computer use works." : "Computer use didn't work."} ${shortModel(info.models.gui)} says: ${r.text}\nLog: ${r.dir}`, r.ok ? "" : "error");
+          })
+          .catch((err) => (stopWorking(s), addNote(s, err.message, "error")));
+      }
+      break; // a task: goes to the agent like a normal message (expanded to use the computer_use tool)
     case "/caffeinate":
     case "/caffinate":
       return api

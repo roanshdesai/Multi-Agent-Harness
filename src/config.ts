@@ -42,6 +42,15 @@ export interface HarnessConfig {
   context?: { handoff_at: number };
   /** /remote: port of the local MCP server other apps use to control the harness. */
   remote?: { port: number };
+  /** Browser extensions the agents may use. */
+  extensions?: { claude_in_chrome?: boolean };
+  /** GPT computer use through Codex: which Mac apps (bundle ids) it may touch, and browser use. */
+  computer_use?: {
+    default_app_access?: "allow" | "deny";
+    apps?: Record<string, "allow" | "deny">;
+    browser?: { access?: "allow" | "deny"; downloads?: "allow" | "deny"; uploads?: "allow" | "deny" };
+    timeout_minutes?: number;
+  };
   subagents_file: string;
   root: string;
 }

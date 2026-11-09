@@ -245,7 +245,7 @@ a { color: inherit; text-decoration-color: var(--ink-3); text-underline-offset: 
 .advice .k { color: var(--plum); }
 .verify-detail { white-space: pre-wrap; font-size: 12.5px; color: var(--ink-2); background: var(--card); border: 1px solid var(--rule-2); border-radius: 6px; padding: 9px 11px; margin-bottom: 14px; }
 .meta { margin-top: -12px; margin-bottom: 24px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: .03em; }
-.note { margin-bottom: 14px; font-size: 12.5px; color: var(--ink-2); font-style: italic; }
+.note { margin-bottom: 14px; font-size: 12.5px; color: var(--ink-2); font-style: italic; white-space: pre-wrap; }
 .note.error { color: var(--brick); font-style: normal; }
 
 /* questions */

@@ -34,4 +34,7 @@ emit({ type: "item.started", item: { id: "i1", type: "command_execution", comman
 emit({ type: "item.completed", item: { id: "i1", type: "command_execution", command: "ls -la", status: "completed" } });
 emit({ type: "item.completed", item: { id: "i2", type: "agent_message", text: `echo(${args.includes("-m") ? args[args.indexOf("-m") + 1] : "?"}): ${prompt}` } });
 emit({ type: "turn.completed", usage: {} });
+// -o <file>: Codex writes the final message there.
+const oi = args.indexOf("-o");
+if (oi >= 0) (await import("node:fs")).writeFileSync(args[oi + 1], `echo(${args.includes("-m") ? args[args.indexOf("-m") + 1] : "?"}): ${prompt}`);
 }

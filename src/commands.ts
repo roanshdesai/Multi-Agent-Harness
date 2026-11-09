@@ -44,6 +44,7 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
   { name: "/usage", description: "Claude plan usage (5-hour and weekly) and ChatGPT status", group: "Harness" },
   { name: "/connections", description: "MCP servers and apps: status, reconnect, turn off, add", group: "Harness", aliases: ["/mcp", "/apps"] },
   { name: "/status", description: "Plans, models, integrations, plugins", group: "Harness" },
+  { name: "/computer", args: "test | <task>", description: "Computer use with GPT through Codex: \"test\" checks it can see the screen; or give it a task", group: "Team" },
   { name: "/caffeinate", args: "[off | 30m | 2h | display]", description: "Keep the computer awake (like macOS caffeinate)", group: "Harness" },
   { name: "/remote", description: "Control this app from another app (e.g. Pally) through an MCP link", group: "Harness" },
   { name: "/handoff", description: "Write a context.md summary of this chat and continue in a new chat from it", group: "Harness" },

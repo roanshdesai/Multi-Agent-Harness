@@ -16,6 +16,7 @@ import { addServer, removeServer, setDisabled } from "../connections.js";
 import { claudeBin, openCommandInTerminal } from "../terminal.js";
 import { tokenStats } from "../token-stats.js";
 import { RemoteControl } from "../remote.js";
+import { runComputerUse, COMPUTER_TEST_PROMPT } from "../tools/computer.js";
 import { parseCaffeinate, type CaffeinateStatus } from "../caffeinate.js";
 import { claudeMemUrls, startClaudeMem, claudeMemDoctor, startHindsight } from "../memory.js";
 import { listDocs, readDoc, summarizeDoc, cachedSummary } from "../docs.js";
@@ -283,6 +284,9 @@ ipcMain.handle("codex-login", async () => {
   if (st.ok) await host.refreshUsage();
   return st;
 });
+// /computer test: run computer use directly (no Claude in between) to check it works.
+ipcMain.handle("computer-test", () => runComputerUse(cfg, COMPUTER_TEST_PROMPT, { timeoutMinutes: 5 }));
+
 // /caffeinate: keep the computer awake (Electron's power-save blocker).
 let caffeine: { id: number; display: boolean; until: number | null; timer?: NodeJS.Timeout } | null = null;
 const caffeineStatus = (): CaffeinateStatus => ({ on: !!caffeine, display: !!caffeine?.display, until: caffeine?.until ?? null });
