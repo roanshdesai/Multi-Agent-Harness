@@ -50,12 +50,14 @@ extensions:
 
 computer_use:
   # GPT (models.gui) operates Mac apps and the screen through Codex.
-  # Only apps listed as allow can be touched; everything else is denied.
+  # default_app_access: allow lets it use every app; set it to deny to allow
+  # only the apps listed below. To block one app, list it as deny.
   # macOS asks once for Screen Recording and Accessibility permission.
-  default_app_access: deny
+  default_app_access: allow
   apps:
     com.google.Chrome: allow
     com.apple.Safari: allow
+    # com.apple.keychainaccess: deny
   browser:            # Codex's browser use (its own browser or your browser via OpenAI's extension)
     access: allow
     downloads: deny
