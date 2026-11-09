@@ -129,7 +129,7 @@ function createWindow(chatId?: string) {
     height: 860,
     minWidth: 820,
     minHeight: 540,
-    title: "Agent Harness",
+    title: "Multi-Agent Harness",
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0b0b0d" : "#fafaf9",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     trafficLightPosition: { x: 16, y: 16 },
@@ -295,7 +295,7 @@ ipcMain.handle("eval", async (_e, tabId: string, filter: string) => {
 });
 
 // ── lifecycle ───────────────────────────────────────────────────────────────
-app.setName("Agent Harness");
+app.setName("Multi-Agent Harness");
 app.whenReady().then(() => {
   // Let the claude-mem and Hindsight viewers (localhost only) load inside the app.
   session.defaultSession.webRequest.onHeadersReceived({ urls: ["http://localhost/*", "http://127.0.0.1/*"] }, (details, cb) => {

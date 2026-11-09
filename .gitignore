@@ -5,3 +5,6 @@ dist/
 vendor/
 evals/results/
 release/
+out/
+mcp-servers.json
+*.local.yaml

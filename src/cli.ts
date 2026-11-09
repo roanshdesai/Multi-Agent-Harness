@@ -247,7 +247,7 @@ async function attach(b: BridgeClient) {
     showPrompt();
   };
   const tab = appTabs.find((t) => t.id === tabId);
-  console.log(c.green("Linked to the Agent Harness app") + c.dim(` · tab "${tab?.title ?? "New chat"}" · ${hello.cwd}`));
+  console.log(c.green("Linked to the Multi-Agent Harness app") + c.dim(` · tab "${tab?.title ?? "New chat"}" · ${hello.cwd}`));
   console.log(c.dim("Messages here show in the app and vice versa. /tabs lists tabs, /tab <n> switches, /detach works on your own."));
   const history = await b.request<{ role: string; text: string }[]>("history", { tabId });
   for (const h of history.slice(-6)) console.log(h.role === "user" ? `${c.dim("›")} ${h.text}` : h.role === "assistant" ? `${h.text}\n` : c.dim(`  ${h.text}`));
@@ -387,7 +387,7 @@ async function command(line: string): Promise<boolean> {
     case "/tabs":
     case "/tab":
     case "/detach":
-      console.log(c.dim("Not linked to the app. Open Agent Harness and start this terminal again to share its tabs."));
+      console.log(c.dim("Not linked to the app. Open Multi-Agent Harness and start this terminal again to share its tabs."));
       return true;
     case "/btw":
       if (!arg) console.log("Usage: /btw <question>");
@@ -534,7 +534,7 @@ async function command(line: string): Promise<boolean> {
     case "/status":
       console.log(
         [
-          `link:      ${bridge ? "linked to the Agent Harness app" : "standalone"}`,
+          `link:      ${bridge ? "linked to the Multi-Agent Harness app" : "standalone"}`,
           `chat:      ${engine.sessionId ?? "(new)"}  ${c.dim(engine.model)}`,
           `billing:   ${cfg.auth.subscription_only ? `subscription only · Claude plan: ${harness.plan ?? "?"} · Codex: ${codexStatus(cfg.root).detail}` : "API keys allowed (HARNESS_ALLOW_API=1)"}`,
           `models:    ${Object.entries(cfg.models).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") : v}`).join("  ")}`,
@@ -620,7 +620,7 @@ async function main() {
   }
 
   console.log(
-    c.bold("Agent harness") +
+    c.bold("Multi-Agent Harness") +
       c.dim(`  main ${harness.mainModel} · advisor/coder ${cfg.models.advisor} · workers ${cfg.models.worker} · GPT ${cfg.models.gpt.join("/")}`),
   );
 

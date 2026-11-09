@@ -1,7 +1,7 @@
 {
-  "name": "agent-harness",
+  "name": "multi-agent-harness",
   "version": "0.1.0",
-  "description": "Multi-model agent harness: Opus orchestrator, Fable advisor/coder, Sonnet workers, GPT-6 Astra GUI tests",
+  "description": "Multi-model agent harness: Opus orchestrator, Fable advisor/coder, Sonnet workers, GPT via Codex. Desktop and terminal apps.",
   "scripts": {
     "start": "tsx src/cli.ts",
     "dev": "tsx src/cli.ts",
@@ -15,14 +15,6 @@
     "desktop:mac": "tsc && electron-builder --mac",
     "desktop:win": "tsc && electron-builder --win"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/roanshdesai/test.git"
-  },
-  "bugs": {
-    "url": "https://github.com/roanshdesai/test/issues"
-  },
-  "homepage": "https://github.com/roanshdesai/test#readme",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.319",
     "@openai/codex": "^0.167.0",
@@ -44,10 +36,10 @@
     "harness": "dist/cli.js"
   },
   "main": "dist/desktop/main.js",
-  "productName": "Agent Harness",
+  "productName": "Multi-Agent Harness",
   "build": {
-    "appId": "dev.agentharness.app",
-    "productName": "Agent Harness",
+    "appId": "dev.multiagentharness.app",
+    "productName": "Multi-Agent Harness",
     "directories": {
       "output": "release",
       "buildResources": "desktop/build"
@@ -105,5 +97,5 @@
       "category": "Development"
     }
   },
-  "author": "Agent Harness"
+  "author": "Multi-Agent Harness"
 }

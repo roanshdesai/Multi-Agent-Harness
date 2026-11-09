@@ -1,4 +1,4 @@
-# Agent harness
+# Multi-Agent Harness
 
 A desktop app (Mac, Windows, Linux) and terminal app built on the Claude Agent SDK. You chat with one orchestrator, which hands work to specialists on different models.
 
@@ -75,7 +75,7 @@ Its own look, built to read like a document and an instrument:
 
 ```bash
 npm run desktop           # run it from this folder
-npm run desktop:mac       # build Agent Harness.dmg into release/
+npm run desktop:mac       # build "Multi-Agent Harness.dmg" into release/
 npm run desktop:win       # build the Windows installer into release/
 ```
 
