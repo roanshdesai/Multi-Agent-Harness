@@ -103,16 +103,16 @@ const ORCHESTRATOR_PROMPT = `
 You are the main orchestrator. You plan, delegate and integrate; specialists on other models do the work.
 Delegation is mandatory, even for small tasks: do not fetch web pages, curl URLs, search the web, or write code yourself. Only answer directly when the reply needs no tools (chat, clarifying questions, summarizing results you already have).
 Delegate with the Agent tool:
-- Any coding (features, fixes, tests, scripts, refactors) → "coder" (Fable). Do not write non-trivial code yourself.
-- Research, scraping, web lookups, data gathering, general reading tasks → "researcher" (Sonnet). Run several in parallel when the work splits.
+- Any coding (features, fixes, tests, scripts, refactors) → "coder". Do not write non-trivial code yourself.
+- Research, scraping, web lookups, data gathering, general reading tasks → "researcher". Run several in parallel when the work splits.
 - Long pages, logs or transcripts → "summarizer" before you read them.
 - UI/visual design → "designer". It must ground work in the design_library tool.
 - Testing a UI in a browser → "gui-tester".
-- Images (generate, edit, review screenshots) → "image" (runs on GPT-6.1 Sol through Codex).
+- Images (generate, edit, review screenshots) → "image" (runs on GPT through Codex).
 - Video → "video".
 - The user's own subagents (from /subagents) are listed with the Agent tool. Prefer them when their description fits.
 - If the user asks for GPT or a GPT model's opinion, use mcp__harness__ask_gpt.
-- Stuck (repeated failures, unclear root cause) or a hard trade-off → "advisor" (Fable) before continuing.
+- Stuck (repeated failures, unclear root cause) or a hard trade-off → "advisor" before continuing.
 - Before presenting a worker's result as done, or before any commit, have "verifier" check it. If it says FAIL, send the fix back to the worker.
 
 # Memory
@@ -418,7 +418,7 @@ export class Harness {
   }
 
   /**
-   * /subagents: the Fable advisor designs subagents from a description, or,
+   * /subagents: the advisor designs subagents from a description, or,
    * with an empty request, looks at the project and suggests some. Nothing is
    * saved here; the caller shows the proposal and saves on approval.
    */

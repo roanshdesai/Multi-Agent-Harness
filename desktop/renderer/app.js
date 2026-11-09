@@ -113,6 +113,7 @@ function welcome() {
   const roles = [
     ["Plans", m.main],
     ["Code + review", m.coder],
+    ["Design", m.designer ?? m.coder],
     ["Research", m.worker],
     ["Images", m.image],
     ["UI tests", m.gui],
@@ -899,6 +900,7 @@ const ROLE_LABELS = {
   main: ["Orchestrator", "Plans and delegates every task"],
   advisor: ["Advisor", "Second opinion when the work gets hard"],
   coder: ["Coder", "All coding work"],
+  designer: ["Designer", "UI and visual design"],
   worker: ["Researcher", "Research, scraping, general tasks"],
   triage: ["Summarizer", "Condenses long pages and logs"],
   video: ["Video", "Video work"],

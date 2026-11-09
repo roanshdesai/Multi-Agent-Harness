@@ -29,14 +29,14 @@ const RESULT_SCHEMA = {
 };
 
 /**
- * GUI testing on your ChatGPT subscription: runs `codex exec` with GPT-6 Astra,
+ * GUI testing on your ChatGPT subscription: runs `codex exec` with the configured GPT model,
  * which drives a headless browser through the Playwright MCP server.
  * Errors come back with isError so the gui-tester agent falls back to Claude + Playwright MCP.
  */
 export function guiTestTool(model: string, root: string) {
   return tool(
     "gui_test",
-    "Run a GUI test in a real headless browser, driven by GPT-6 Astra (via your ChatGPT subscription). Give a URL and a checklist.",
+    "Run a GUI test in a real headless browser, driven by GPT (via your ChatGPT subscription). Give a URL and a checklist.",
     {
       url: z.string().url(),
       checklist: z.string().describe("What to verify, one item per line"),
@@ -100,7 +100,7 @@ ${checklist}`;
         return {
           content: [{
             type: "text",
-            text: `${r.passed ? "PASSED" : "FAILED"} (GPT-6 Astra via Codex)\n${lines.join("\n")}\n\nConsole errors:\n${r.console_errors.join("\n") || "(none)"}\nScreenshots and log: ${dir}`,
+            text: `${r.passed ? "PASSED" : "FAILED"} (${model} via Codex)\n${lines.join("\n")}\n\nConsole errors:\n${r.console_errors.join("\n") || "(none)"}\nScreenshots and log: ${dir}`,
           }],
         };
       } catch {

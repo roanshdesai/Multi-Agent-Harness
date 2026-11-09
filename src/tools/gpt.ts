@@ -39,7 +39,7 @@ function newestImage(dir: string, since: number): string | null {
   return best?.p ?? null;
 }
 
-/** Images: generate, edit, or describe, on the image model (GPT-6.1 Sol by default). */
+/** Images: generate, edit, or describe, on the image model set in harness.config.yaml. */
 export function imageTool(root: string, model: string, fallback: string) {
   return tool(
     "image",

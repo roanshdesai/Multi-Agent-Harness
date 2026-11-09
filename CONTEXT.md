@@ -15,7 +15,8 @@ One orchestrator plans and delegates to specialists on different models.
 |---|---|---|
 | Orchestrator | `claude-opus-5-5` | Must delegate; doesn't do the work itself (prompt in `src/session.ts`) |
 | Advisor | `claude-fable-5-1` | Server-side advisor tool (`settings.advisorModel`): the working model consults it on its own. Also an `advisor` subagent as a backstop after 3 tool failures (`src/guards.ts`) |
-| Coder, designer, verifier | `claude-fable-5-1` | The verifier checks delegated work on a throwaway fork (`Harness.verify`) |
+| Designer | `claude-opus-5-5` | Own role (`models.designer`); falls back to the coder's model if unset |
+| Coder, verifier | `claude-fable-5-1` | The verifier checks delegated work on a throwaway fork (`Harness.verify`) |
 | Researcher, summarizer, GUI-tester coordinator | `claude-sonnet-5-5` | |
 | GUI testing | `gpt-6-astra` via Codex CLI | `src/tools/gui-test.ts`; falls back to Playwright MCP |
 | Images | `gpt-6.1-sol` via Codex (falls back to `gpt-6-astra`) | `src/tools/gpt.ts` |

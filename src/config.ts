@@ -13,6 +13,8 @@ export interface HarnessConfig {
     triage: string;
     video: string;
     verifier: string;
+    /** UI and visual design. Falls back to the coder's model when not set. */
+    designer?: string;
     gui: string;
     image: string;
     image_fallback: string;
@@ -55,7 +57,7 @@ export function loadDotEnv(root: string): void {
 }
 
 /** Model roles the app lets you change. */
-export const MODEL_ROLES = ["main", "advisor", "coder", "worker", "triage", "video", "verifier", "gui", "image", "image_fallback"] as const;
+export const MODEL_ROLES = ["main", "advisor", "coder", "designer", "worker", "triage", "video", "verifier", "gui", "image", "image_fallback"] as const;
 export const MODEL_LISTS = ["gpt", "claude", "fallback"] as const;
 
 /**

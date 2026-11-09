@@ -3,7 +3,7 @@ import type { HarnessConfig } from "./config.js";
 import { loadSubagents, toAgentDefinition } from "./subagents.js";
 
 /**
- * Subagents the main Opus orchestrator can delegate to via the Agent tool.
+ * Subagents the main orchestrator can delegate to via the Agent tool.
  * Each one runs on its own model.
  */
 /** Agents whose real work runs on a model other than their own (shown in /agents and the app). */
@@ -33,7 +33,7 @@ function builtinAgents(cfg: HarnessConfig): Record<string, AgentDefinition> {
   return {
     advisor: {
       description:
-        "Senior advisor (Fable). Use when stuck, after repeated failures, when choosing between approaches, or before any irreversible decision. Give it the goal, what was tried, and the exact errors.",
+        "Senior advisor. Use when stuck, after repeated failures, when choosing between approaches, or before any irreversible decision. Give it the goal, what was tried, and the exact errors.",
       model: m.advisor,
       effort: cfg.effort.advisor,
       tools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
@@ -47,7 +47,7 @@ Read files yourself if needed. Do not edit anything.`,
 
     coder: {
       description:
-        "Writes, edits, refactors and debugs code (Fable). Use for ANY coding work: features, bug fixes, tests, scripts. Follows the superpowers workflow (plan, TDD, verify).",
+        "Writes, edits, refactors and debugs code. Use for ANY coding work: features, bug fixes, tests, scripts. Follows the superpowers workflow (plan, TDD, verify).",
       model: m.coder,
       effort: cfg.effort.coder,
       prompt: `You are the coding agent. Work test-first where the project has tests.
@@ -59,7 +59,7 @@ Never push to git; the main agent handles pushes.`,
 
     researcher: {
       description:
-        "Research, web search, scraping, data gathering, and general non-coding tasks (Sonnet). Use for anything that is mostly reading.",
+        "Research, web search, scraping, data gathering, and general non-coding tasks. Use for anything that is mostly reading.",
       model: m.worker,
       effort: cfg.effort.worker,
       prompt: `You are a research worker. Use Firecrawl/Exa/WebSearch/WebFetch and Context7 for library docs.
@@ -69,7 +69,7 @@ Save large raw dumps to files under .harness/scratch/ and return the path rather
 
     summarizer: {
       description:
-        "Compresses long scraped pages, logs or transcripts into tight notes before they reach the main agent (Sonnet).",
+        "Compresses long scraped pages, logs or transcripts into tight notes before they reach the main agent.",
       model: m.triage,
       effort: "low",
       tools: ["Read", "Write", "Glob", "Grep"],
@@ -78,7 +78,7 @@ Save large raw dumps to files under .harness/scratch/ and return the path rather
 
     "gui-tester": {
       description:
-        "Tests web UIs in a real browser. The testing itself runs on GPT-6 Astra through Codex (gui_test tool); this Sonnet agent briefs it and falls back to Playwright MCP if Codex fails.",
+        "Tests web UIs in a real browser. The testing itself runs on GPT through Codex (gui_test tool); this agent briefs it and falls back to Playwright MCP if Codex fails.",
       model: m.worker,
       effort: cfg.effort.worker,
       prompt: `You test user interfaces.
@@ -98,7 +98,7 @@ Return the saved file paths and one line on each.`,
     },
 
     video: {
-      description: "Video work: editing, cutting, captions, rendering, analysis of video files (Opus).",
+      description: "Video work: editing, cutting, captions, rendering, analysis of video files.",
       model: m.video,
       effort: cfg.effort.main,
       prompt: `You handle video. Use ffmpeg/ffprobe via Bash for cutting, encoding, captions and frame extraction; use Remotion when asked to generate video from code.
@@ -107,7 +107,7 @@ Inspect frames you extract to verify results. Write outputs to ./out/ and report
 
     designer: {
       description: "UI/UX design and frontend look-and-feel. Always grounded in the user's design links library.",
-      model: m.coder,
+      model: m.designer ?? m.coder,
       effort: cfg.effort.coder,
       prompt: `You design interfaces, grounded in the user's UI links library.
 1. Call design_library first. Use platform "swift" only for SwiftUI/iOS work; for web, Swift-only references (Apple HIG and the SwiftUI repos) are off-limits.

@@ -5,7 +5,7 @@ import type { AccountInfo } from "@anthropic-ai/claude-agent-sdk";
 
 /**
  * Subscription-only mode: Claude runs on your Claude plan (Pro/Max/Team login)
- * and GPT-6 Astra runs on your ChatGPT plan through the Codex CLI.
+ * and GPT runs on your ChatGPT plan through the Codex CLI.
  * Any API-key style credential is removed so nothing can fall back to API billing.
  */
 export const API_CREDENTIAL_VARS = [

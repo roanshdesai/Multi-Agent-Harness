@@ -9,6 +9,7 @@ models:
   main: claude-opus-5-5          # orchestrator
   advisor: claude-fable-5-1      # second opinion, used when stuck
   coder: claude-fable-5-1        # all coding work
+  designer: claude-opus-5-5      # UI and visual design
   worker: claude-sonnet-5-5      # scraping, research, general tasks
   triage: claude-sonnet-5-5      # summarize / compress scraped content (upgraded from Haiku)
   video: claude-opus-5-5

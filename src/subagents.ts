@@ -96,7 +96,7 @@ ${a.prompt}`,
   return { description: a.description, model: a.model, prompt: a.prompt, ...(a.tools?.length && { tools: a.tools }) };
 }
 
-/** The prompt that asks the Fable advisor to design subagents. */
+/** The prompt that asks the advisor to design subagents. */
 export function designPrompt(request: string, existing: { name: string; description: string }[], cfg: HarnessConfig): string {
   const claudeModels = [cfg.models.main, cfg.models.advisor, cfg.models.worker].filter((m, i, a) => a.indexOf(m) === i);
   return `You are designing subagents for the user's multi-model agent harness. Each subagent is a specialist the orchestrator (${cfg.models.main}) can delegate to.
