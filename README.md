@@ -10,6 +10,7 @@ A desktop app (Mac, Windows, Linux) and terminal app built on the Claude Agent S
 | Researcher | Claude Sonnet 5.5 | Scraping, research and general tasks |
 | Summarizer | Claude Sonnet 5.5 | Shortens long pages and logs before the orchestrator reads them |
 | GUI tester | GPT-6 Astra via Codex CLI | Browser testing. Codex drives Playwright on your ChatGPT plan. Falls back to Claude + Playwright MCP if Codex fails or isn't signed in. |
+| Images | GPT-6.1 Sol via Codex (falls back to GPT-6 Astra) | Generate, edit, and review screenshots |
 | Video | Claude Opus 5.5 | ffmpeg and Remotion |
 | Verifier | Claude Fable 5.1 | Checks every delegated result before you see it, on a throwaway copy of the chat |
 
@@ -41,6 +42,17 @@ Each MCP server is only loaded once its keys are in `.env`. `/status` shows whic
 
 ## Desktop app
 
+**Tabs:** every tab is its own task with its own model, so several run at once (⌘T new tab, ⌘W close, ⌘1–9 switch). A tab that's working shows a moving border.
+
+**Claude or GPT per tab:** the model picker at the top lists Opus, Fable and Sonnet (Claude plan) and GPT-6 Astra and GPT-6.1 Sol (ChatGPT plan, through Codex). Switching a tab that already has a conversation to the other family opens a new tab, since they can't share history.
+
+**Terminal link:** while the app is open, `npm start` in a terminal joins the same tabs. Messages typed in either show in both; the app marks terminal messages "from terminal". `/tabs`, `/tab <n>` and `/detach` work in the linked terminal. If the app closes, the terminal carries on by itself.
+
+**Memory in the sidebar:** claude-mem and Hindsight open as tabs showing their own viewers, so you can browse and organize what they've stored. A green dot means it's running; otherwise the tab shows how to start it. Addresses are under `memory:` in `harness.config.yaml`.
+
+**/subagents:** describe the subagents you want, or leave it empty and the Fable advisor looks at the project and suggests some. You review each proposal and pick which to add. They're saved in `subagents.yaml`, and GPT-based ones run through a Sonnet coordinator that calls GPT.
+
+
 ```bash
 npm run desktop           # run it from this folder
 npm run desktop:mac       # build Agent Harness.dmg into release/
@@ -68,7 +80,9 @@ The terminal version (`npm start`) runs on the same engine and has the same comm
 | `/fork [title]` | Copies this chat and opens the copy in a **new terminal window** (tmux, macOS Terminal or iTerm, Windows Terminal, or a Linux terminal). `--here` switches to the copy in place instead. |
 | `/btw <q>` | Asks a side question on a throwaway copy of the chat. Works while a turn is running and never changes the main chat. |
 | `/new` `/chats` `/resume <id or #>` `/rename` `/compact` `/stop` | Manage chats |
-| `/advisor` `/code` `/research` `/test` `/video` | Send a task straight to one specialist |
+| `/advisor` `/code` `/research` `/test` `/image` `/video` | Send a task straight to one specialist |
+| `/subagents [describe \| suggest \| remove <name>]` | Make your own subagents |
+| `/tabs` `/tab <n>` `/detach` | Terminal linked to the app |
 | `/design [q]` | Search your UI links (include `swift` to see the SwiftUI ones) |
 | `/remember` `/recall` | Save to or search long-term memory |
 | `/status` `/agents` `/model` `/verify on\|off` `/eval` | Inspect and control the harness |
@@ -98,6 +112,12 @@ Results are saved to `evals/results/`. Re-run the evals after you change a model
 ```
 src/engine.ts           chat engine shared by both apps: turns, verifier loop, /btw, /fork
 src/commands.ts         one command list for both apps, merged with skill/plugin commands
+src/host.ts             open tabs, each with its own engine (desktop app)
+src/bridge.ts           local link that lets a terminal join the app's tabs
+src/gpt-chat.ts         GPT chat engine (Codex, ChatGPT plan)
+src/codex.ts            runs Codex turns and parses its JSON events
+src/subagents.ts        /subagents storage and the advisor's design prompt
+src/tools/gpt.ts        ask_gpt and image tools for the Claude team
 src/cli.ts              terminal app
 src/desktop/main.ts     desktop app (Electron main process)
 desktop/renderer/       desktop window UI

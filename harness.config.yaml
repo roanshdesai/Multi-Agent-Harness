@@ -14,6 +14,10 @@ models:
   video: claude-opus-5-5
   verifier: claude-fable-5-1     # checks worker output before it is accepted
   gui: gpt-6-astra               # runs through Codex CLI on your ChatGPT subscription
+  image: gpt-6.1-sol             # image generation, editing and analysis (via Codex)
+  image_fallback: gpt-6-astra
+  # GPT models you can pick at the top of a tab (ChatGPT subscription, via Codex)
+  gpt: [gpt-6-astra, gpt-6.1-sol]
   # Fallback chain (item 10): tried in order if the primary is overloaded/unavailable
   fallback: [claude-opus-5-5, claude-sonnet-5-5]
 
@@ -40,6 +44,14 @@ approvals:
 sandbox:
   enabled: true                  # sandbox Bash (bubblewrap on Linux, Seatbelt on macOS)
   fail_if_unavailable: false
+
+memory:
+  # Viewers shown in the sidebar. The first address that answers is used.
+  claude_mem: [http://localhost:37701, http://localhost:37777]
+  hindsight: [http://localhost:9999, http://localhost:8888]
+
+# Your own subagents, made with /subagents (or edit the file by hand)
+subagents_file: ./subagents.yaml
 
 design_library: ./design-library/UI-LINKS.md   # Markdown, YAML or a plain URL list
 

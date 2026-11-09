@@ -15,7 +15,7 @@ import { Harness, type TurnResult } from "./session.js";
 export type ChatEvent =
   | { type: "session"; id: string }
   | { type: "busy"; busy: boolean }
-  | { type: "queued"; text: string }
+  | { type: "user"; text: string; queued?: boolean; source?: string }
   | { type: "text-delta"; text: string }
   | { type: "text"; text: string }
   | { type: "agent"; id: string; agent: string; description: string }
@@ -34,6 +34,24 @@ export interface ChatSummary {
   id: string;
   title: string;
   updated: number;
+  kind?: "claude" | "gpt";
+  model?: string;
+}
+
+/** What every chat engine (Claude or GPT) offers to the apps. */
+export interface Engine {
+  readonly kind: "claude" | "gpt";
+  model: string;
+  sessionId?: string;
+  busy: boolean;
+  send(text: string, source?: string): void;
+  stop(): Promise<void>;
+  newChat(): void;
+  resume(id: string): void;
+  history(id: string): Promise<HistoryItem[]>;
+  btw(question: string): Promise<string>;
+  fork(title?: string): Promise<string>;
+  rename(title: string): Promise<void>;
 }
 
 export function summarizeInput(input: any): string {
@@ -54,6 +72,8 @@ export function expandShortcut(cmd: string, arg: string): string | null {
       return `Have the "gui-tester" agent test this: ${arg}`;
     case "/video":
       return `Delegate to the "video" agent: ${arg}`;
+    case "/image":
+      return `Delegate to the "image" agent (GPT-6.1 Sol): ${arg}`;
     case "/remember":
       return `Store this in long-term memory (Hindsight retain), confirm briefly: ${arg}`;
     case "/recall":
@@ -67,7 +87,8 @@ export function expandShortcut(cmd: string, arg: string): string | null {
  * One chat: runs turns (with the verifier loop), queues input while busy,
  * answers /btw on a throwaway fork, and forks/resumes sessions.
  */
-export class ChatEngine {
+export class ChatEngine implements Engine {
+  readonly kind = "claude" as const;
   sessionId?: string;
   busy = false;
   private current: Query | null = null;
@@ -87,11 +108,18 @@ export class ChatEngine {
     return this.opts.cwd ?? process.cwd();
   }
 
-  /** Send user input; queued if a turn is already running. */
-  send(text: string) {
+  get model() {
+    return this.harness.mainModel;
+  }
+  set model(m: string) {
+    this.harness.modelOverride = m;
+  }
+
+  /** Send user input; queued if a turn is already running. `source` says which app typed it. */
+  send(text: string, source?: string) {
+    this.emit({ type: "user", text, queued: this.busy, source });
     if (this.busy) {
       this.queue.push(text);
-      this.emit({ type: "queued", text });
       return;
     }
     void this.runTurn(text);

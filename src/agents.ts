@@ -1,5 +1,6 @@
 import type { AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
 import type { HarnessConfig } from "./config.js";
+import { loadSubagents, toAgentDefinition } from "./subagents.js";
 
 /**
  * Subagents the main Opus orchestrator can delegate to via the Agent tool.
@@ -7,10 +8,27 @@ import type { HarnessConfig } from "./config.js";
  */
 /** Agents whose real work runs on a model other than their own (shown in /agents and the app). */
 export function agentRunsOn(cfg: HarnessConfig): Record<string, string> {
-  return { "gui-tester": `${cfg.models.gui} (via Codex, ChatGPT plan)` };
+  const out: Record<string, string> = {
+    "gui-tester": `${cfg.models.gui} (via Codex, ChatGPT plan)`,
+    image: `${cfg.models.image} (via Codex, ChatGPT plan)`,
+  };
+  for (const a of loadSubagents(cfg)) if (a.engine === "gpt") out[a.name] = `${a.model} (via Codex, ChatGPT plan)`;
+  return out;
 }
 
+/** Names of the agents you made with /subagents. */
+export function customAgentNames(cfg: HarnessConfig): string[] {
+  return loadSubagents(cfg).map((a) => a.name);
+}
+
+/** Built-in team plus your /subagents (yours win on a name clash). */
 export function buildAgents(cfg: HarnessConfig): Record<string, AgentDefinition> {
+  const team = builtinAgents(cfg);
+  for (const a of loadSubagents(cfg)) team[a.name] = toAgentDefinition(a, cfg);
+  return team;
+}
+
+function builtinAgents(cfg: HarnessConfig): Record<string, AgentDefinition> {
   const m = cfg.models;
   return {
     advisor: {
@@ -67,6 +85,16 @@ Save large raw dumps to files under .harness/scratch/ and return the path rather
 1. First call the gui_test tool with the URL and a precise checklist of what to verify.
 2. If gui_test errors or is unavailable, do the same checks yourself with the Playwright MCP tools (mcp__playwright__*).
 Report each check as PASS/FAIL with evidence (screenshot path, console errors, observed text).`,
+    },
+
+    image: {
+      description: `Any image work: generating images, icons, illustrations and mockups, editing images, or reviewing screenshots. The image work runs on ${m.image} through Codex (image tool); this agent briefs it.`,
+      model: m.worker,
+      effort: "low",
+      tools: ["Read", "Glob", "mcp__harness__image", "mcp__harness__design_library"],
+      prompt: `You handle images. Use the mcp__harness__image tool for all of it: task "generate" for new images, "edit" with input paths to change one, "analyze" to describe or review screenshots.
+Write precise prompts: subject, composition, style, colors, text in the image, aspect ratio. For UI mockups, call design_library first and describe the references' style.
+Return the saved file paths and one line on each.`,
     },
 
     video: {

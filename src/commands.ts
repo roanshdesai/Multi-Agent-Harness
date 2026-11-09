@@ -20,12 +20,17 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
   { name: "/rename", args: "<title>", description: "Rename this chat", group: "Chat" },
   { name: "/compact", description: "Summarize the chat so far to free up context", group: "Chat" },
   { name: "/stop", description: "Stop the running turn (and its verifier)", group: "Chat" },
+  { name: "/tabs", description: "List open tabs (terminal linked to the app; in the app, use the tab bar)", group: "Chat" },
+  { name: "/tab", args: "<n>", description: "Switch tab (terminal linked to the app; in the app, ⌘1–9)", group: "Chat" },
+  { name: "/detach", description: "Stop sharing tabs with the app (terminal only)", group: "Chat" },
 
   { name: "/advisor", args: "<question>", description: "Ask the Fable advisor", group: "Team" },
   { name: "/code", args: "<task>", description: "Hand a coding task to the Fable coder", group: "Team" },
   { name: "/research", args: "<question>", description: "Send Sonnet researchers", group: "Team" },
   { name: "/test", args: "<url> <checklist>", description: "GUI test with GPT-6 Astra (via Codex)", group: "Team" },
+  { name: "/image", args: "<what to make or check>", description: "Images on GPT-6.1 Sol: generate, edit, review screenshots", group: "Team" },
   { name: "/video", args: "<task>", description: "Video task for Opus", group: "Team" },
+  { name: "/subagents", args: "[describe | suggest | remove <name>]", description: "Make your own subagents; empty = the advisor suggests some", group: "Team" },
   { name: "/design", args: "[query]", description: "Search your UI links (add 'swift' for SwiftUI)", group: "Team" },
 
   { name: "/remember", args: "<fact>", description: "Save to long-term memory (Hindsight)", group: "Memory" },
@@ -33,7 +38,7 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
 
   { name: "/agents", description: "Show the team and their models", group: "Harness" },
   { name: "/status", description: "Plans, models, integrations, plugins", group: "Harness" },
-  { name: "/model", args: "[id]", description: "Show or change the main model", group: "Harness" },
+  { name: "/model", args: "[id]", description: "Change this tab's model, Claude or GPT", group: "Harness" },
   { name: "/verify", args: "on | off", description: "Turn the Fable verifier on or off", group: "Harness" },
   { name: "/eval", args: "[filter]", description: "Run the eval suite", group: "Harness" },
   { name: "/help", description: "All commands, including skills and plugins", group: "Harness" },

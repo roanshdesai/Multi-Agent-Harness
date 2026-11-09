@@ -129,3 +129,101 @@ test("commands: harness commands win, plugin commands added, only useful built-i
   assert.equal(canonical("/clear"), "/new");
   assert.equal(canonical("/quit"), "/exit");
 });
+
+// ── subagents, GPT chats, bridge ───────────────────────────────────────────
+function tmpCfg() {
+  const dir = mkdtempSync(join(tmpdir(), "cfg-"));
+  return {
+    root: dir,
+    subagents_file: join(dir, "subagents.yaml"),
+    models: { main: "claude-opus-5-5", advisor: "claude-fable-5-1", worker: "claude-sonnet-5-5", gpt: ["gpt-6-astra", "gpt-6.1-sol"], gui: "gpt-6-astra", image: "gpt-6.1-sol" },
+    auth: { subscription_only: true },
+  } as unknown as HarnessConfig;
+}
+
+test("subagents: save, replace by name, remove; GPT ones get a Sonnet coordinator", async () => {
+  const { upsertSubagents, loadSubagents, removeSubagent, toAgentDefinition } = await import("../src/subagents.js");
+  const cfg = tmpCfg();
+  upsertSubagents(cfg, [
+    { name: "SEO Writer", description: "Writes SEO copy", engine: "claude", model: "claude-sonnet-5-5", prompt: "Write." },
+    { name: "copy-critic", description: "Critiques copy", engine: "claude", model: "gpt-6-astra", prompt: "Critique." },
+  ]);
+  let list = loadSubagents(cfg);
+  assert.deepEqual(list.map((a) => a.name), ["seo-writer", "copy-critic"]);
+  assert.equal(list[1].engine, "gpt"); // a GPT model forces the gpt engine
+  const gptDef = toAgentDefinition(list[1], cfg);
+  assert.equal(gptDef.model, "claude-sonnet-5-5");
+  assert.match(gptDef.prompt, /mcp__harness__ask_gpt/);
+  assert.match(gptDef.prompt, /gpt-6-astra/);
+  upsertSubagents(cfg, [{ name: "seo-writer", description: "v2", engine: "claude", model: "claude-sonnet-5-5", prompt: "Write v2." }]);
+  list = loadSubagents(cfg);
+  assert.equal(list.length, 2);
+  assert.equal(list.find((a) => a.name === "seo-writer")!.description, "v2");
+  assert.ok(removeSubagent(cfg, "seo-writer"));
+  assert.ok(!removeSubagent(cfg, "nope"));
+  assert.deepEqual(loadSubagents(cfg).map((a) => a.name), ["copy-critic"]);
+});
+
+test("GPT chat: runs through Codex, maps events, keeps a transcript, resumes the thread", async () => {
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const { GptChat, listGptChats } = await import("../src/gpt-chat.js");
+  const cfg = tmpCfg();
+  const events: any[] = [];
+  const chat = new GptChat(cfg, "gpt-6-astra", (e) => events.push(e), cfg.root);
+  const idle = () => new Promise<void>((r) => { const t = setInterval(() => { if (!chat.busy) { clearInterval(t); r(); } }, 20); });
+  chat.send("hello", "terminal");
+  await idle();
+  assert.equal(chat.sessionId, "thread-123");
+  assert.deepEqual(events.find((e) => e.type === "user"), { type: "user", text: "hello", queued: false, source: "terminal" });
+  assert.ok(events.some((e) => e.type === "tool" && e.name === "Shell" && e.summary === "ls -la"));
+  assert.ok(events.some((e) => e.type === "text" && e.text === "echo(gpt-6-astra): hello"));
+  assert.ok(events.some((e) => e.type === "turn-end" && !e.isError));
+
+  chat.send("again");
+  await idle();
+  const texts = events.filter((e) => e.type === "text").map((e) => e.text);
+  assert.equal(texts.at(-1), "echo(gpt-6-astra): again");
+  assert.equal(chat.sessionId, "thread-123"); // resumed, same thread
+  const listed = listGptChats(cfg, cfg.root);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].title, "hello");
+  const history = await chat.history("thread-123");
+  assert.deepEqual(history.filter((h) => h.role !== "tool").map((h) => h.role), ["user", "assistant", "user", "assistant"]);
+  delete process.env.HARNESS_CODEX_BIN;
+});
+
+test("bridge: a terminal client gets tab lists and events, and its sends reach the host", async () => {
+  const { startBridge, connectBridge, bridgePath } = await import("../src/bridge.js");
+  const home = mkdtempSync(join(tmpdir(), "home-"));
+  const oldHome = process.env.HOME;
+  process.env.HOME = home;
+  const listeners = new Set<any>();
+  const sent: any[] = [];
+  const fakeHost: any = {
+    activeTab: "t1",
+    list: () => [{ id: "t1", windowId: 1, kind: "claude", model: "claude-opus-5-5", sessionId: null, title: "New chat", busy: false, verify: true }],
+    listen: (fn: any) => (listeners.add(fn), () => listeners.delete(fn)),
+    send: (tabId: string, text: string, source: string) => {
+      sent.push({ tabId, text, source });
+      for (const l of listeners) l({ type: "event", tabId, event: { type: "user", text, source } });
+    },
+    history: async () => [],
+  };
+  const server = startBridge(fakeHost, () => {}, () => 1);
+  await new Promise((r) => server.once("listening", r));
+  assert.ok(bridgePath().startsWith(home));
+  const client = await connectBridge(1000);
+  assert.ok(client);
+  const pushes: any[] = [];
+  client!.onPush((m) => pushes.push(m));
+  const hello = await client!.request("hello");
+  assert.equal(hello.active, "t1");
+  await client!.request("send", { tabId: "t1", text: "from the terminal" });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sent, [{ tabId: "t1", text: "from the terminal", source: "terminal" }]);
+  assert.ok(pushes.some((m) => m.type === "event" && m.event.text === "from the terminal"));
+  await assert.rejects(client!.request("bogus"), /Unknown op/);
+  client!.close();
+  server.close();
+  process.env.HOME = oldHome;
+});

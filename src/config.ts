@@ -14,6 +14,9 @@ export interface HarnessConfig {
     video: string;
     verifier: string;
     gui: string;
+    image: string;
+    image_fallback: string;
+    gpt: string[];
     fallback: string[];
   };
   effort: Record<"main" | "advisor" | "coder" | "worker" | "verifier", Effort>;
@@ -26,6 +29,8 @@ export interface HarnessConfig {
   chats_dir: string;
   mcp: Record<string, boolean>;
   auth: { subscription_only: boolean };
+  memory: { claude_mem: string[]; hindsight: string[] };
+  subagents_file: string;
   root: string;
 }
 
@@ -51,6 +56,11 @@ export function loadConfig(root = process.env.HARNESS_ROOT ?? process.cwd()): Ha
   const cfg = YAML.parse(expandEnv(readFileSync(file, "utf8"))) as HarnessConfig;
   cfg.root = root;
   cfg.auth ??= { subscription_only: true };
+  cfg.models.image ??= "gpt-6.1-sol";
+  cfg.models.image_fallback ??= cfg.models.gui;
+  cfg.models.gpt ??= [cfg.models.gui, cfg.models.image];
+  cfg.memory ??= { claude_mem: ["http://localhost:37701", "http://localhost:37777"], hindsight: ["http://localhost:9999", "http://localhost:8888"] };
+  cfg.subagents_file = resolve(root, cfg.subagents_file ?? "subagents.yaml");
   // Escape hatch for CI/testing machines that only have API credentials.
   if (process.env.HARNESS_ALLOW_API === "1") cfg.auth.subscription_only = false;
   cfg.design_library = resolve(root, cfg.design_library);

@@ -4,13 +4,14 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: file:; frame-src http://localhost:* http://127.0.0.1:*; connect-src 'none'"
     />
     <title>Agent Harness</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="app" id="app">
+      <!-- ── sidebar ── -->
       <aside class="sidebar">
         <div class="drag-region"></div>
         <div class="brand">
@@ -19,11 +20,54 @@
           </div>
           <span>Agent Harness</span>
         </div>
-        <button class="new-chat" id="newChat" title="New chat (⌘N)">
-          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>New chat
+
+        <button class="new-chat" id="newTabBtn" title="New tab (⌘T)">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+          <span>New task</span>
+          <kbd>⌘T</kbd>
         </button>
-        <input class="chat-search" id="chatSearch" placeholder="Search chats" />
-        <nav class="chat-list" id="chatList" aria-label="Chats"></nav>
+
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4-4" /></svg>
+          <input class="chat-search" id="chatSearch" placeholder="Search chats" />
+          <kbd>⌘K</kbd>
+        </div>
+
+        <div class="side-scroll">
+          <div class="side-section">
+            <div class="side-label">Memory</div>
+            <button class="side-item mem" id="memClaudeMem" data-mem="claudeMem">
+              <span class="mem-icon cm">
+                <svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2.4 4.8.8.8 1.1 1.5 1.1 2.7V18h5v-1.5c0-1.2.3-1.9 1.1-2.7C16.8 12.6 18 11.2 18 9a6 6 0 0 0-6-6zM10 21h4" /></svg>
+              </span>
+              <span class="side-text">claude-mem<small>Session memory</small></span>
+              <span class="dot" data-status></span>
+            </button>
+            <button class="side-item mem" id="memHindsight" data-mem="hindsight">
+              <span class="mem-icon hs">
+                <svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
+              </span>
+              <span class="side-text">Hindsight<small>Long-term memory</small></span>
+              <span class="dot" data-status></span>
+            </button>
+          </div>
+
+          <div class="side-section">
+            <div class="side-label">Team</div>
+            <button class="side-item" id="teamBtn">
+              <span class="mem-icon team">
+                <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.3" /><path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6M15 14.6c2.6-.3 4.8 1 5.5 3.9" /></svg>
+              </span>
+              <span class="side-text">Subagents<small id="teamCount">Built-in team</small></span>
+            </button>
+          </div>
+
+          <div class="side-section">
+            <div class="side-label">Chats</div>
+            <nav class="chat-list" id="chatList" aria-label="Chats"></nav>
+          </div>
+        </div>
+
         <div class="sidebar-foot">
           <button class="workspace" id="workspaceBtn" title="Folder the agents work in">
             <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
@@ -33,14 +77,22 @@
         </div>
       </aside>
 
+      <!-- ── main ── -->
       <main class="main">
-        <header class="topbar">
-          <div class="title-wrap">
-            <h1 id="chatTitle" title="Double-click to rename">New chat</h1>
-          </div>
+        <div class="tabbar" id="tabbar">
+          <div class="tabs" id="tabs" role="tablist"></div>
+          <button class="tab-add" id="tabAdd" title="New tab (⌘T)" aria-label="New tab">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+        </div>
+
+        <header class="topbar" id="topbar">
+          <h1 id="chatTitle" title="Double-click to rename">New chat</h1>
           <div class="top-actions">
-            <label class="pill" title="Main model">
+            <label class="model-pick" title="Model for this tab">
+              <span class="model-dot" id="modelDot"></span>
               <select id="modelSelect"></select>
+              <svg viewBox="0 0 24 24" class="chev"><path d="M7 10l5 5 5-5" /></svg>
             </label>
             <button class="pill toggle" id="verifyBtn" title="Fable verifier checks delegated work">Verifier</button>
             <button class="ghost" id="btwBtn" title="Side question (/btw)">btw</button>
@@ -50,17 +102,11 @@
           </div>
         </header>
 
-        <section class="thread" id="thread" aria-live="polite">
-          <div class="empty" id="empty">
-            <h2>What should the team work on?</h2>
-            <p>Opus plans and delegates. Fable codes and advises, Sonnet researches, GPT-6 Astra tests the UI.</p>
-            <div class="suggestions" id="suggestions"></div>
-          </div>
-        </section>
+        <div class="views" id="views"></div>
 
-        <footer class="composer-wrap">
+        <footer class="composer-wrap" id="composerWrap">
           <div class="slash-menu" id="slashMenu" role="listbox" hidden></div>
-          <div class="composer">
+          <div class="composer" id="composer">
             <textarea id="input" rows="1" placeholder="Message the team. Type / for commands" autofocus></textarea>
             <button class="send" id="sendBtn" title="Send (Enter)" aria-label="Send">
               <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -69,7 +115,7 @@
               <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
             </button>
           </div>
-          <div class="hint" id="hint">Enter to send · Shift+Enter for a new line · only GitHub pushes ask for approval</div>
+          <div class="hint" id="hint"></div>
         </footer>
       </main>
 

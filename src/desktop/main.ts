@@ -1,16 +1,17 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, type WebContents } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, session, type WebContents } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { loadConfig, type HarnessConfig } from "../config.js";
 import { Harness } from "../session.js";
-import { ChatEngine, expandShortcut, type ChatEvent } from "../engine.js";
-import { buildAgents, agentRunsOn } from "../agents.js";
+import { Host } from "../host.js";
+import { startBridge } from "../bridge.js";
+import { buildAgents, agentRunsOn, customAgentNames } from "../agents.js";
 import { runEvals } from "../eval.js";
 import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "../tools/design-library.js";
 import { codexStatus } from "../subscription.js";
-import type { CommandInfo } from "../commands.js";
+import { upsertSubagents, removeSubagent, type CustomSubagent } from "../subagents.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(here, "..", ".."); // repo root (dev) or app.asar (packaged)
@@ -76,26 +77,60 @@ const savePrefs = () => writeFileSync(prefsFile, JSON.stringify(prefs, null, 2))
 // Agents work in the chosen folder; chats are stored per folder.
 if (existsSync(prefs.workspace)) process.chdir(prefs.workspace);
 
-// One subscription check per app launch.
-let auth: { plan?: string; error?: string; commands?: CommandInfo[] } | null = null;
+// ── windows & the shared host ───────────────────────────────────────────────
+const windows = new Map<number, BrowserWindow>(); // keyed by webContents id
+let lastFocused = 0;
 
-interface WinState {
-  win: BrowserWindow;
-  harness: Harness;
-  chat: ChatEngine;
+function winFor(windowId: number) {
+  return windows.get(windowId) ?? [...windows.values()][0];
 }
-const windows = new Map<number, WinState>();
 
-function createWindow(sessionId?: string) {
+/** The only approval in the harness: GitHub pushes, asked with a native dialog. */
+const askFor = (windowId: number) => async (question: string) => {
+  const win = winFor(windowId);
+  const detail = question.replace(/^\s*⚠\s*Approve GitHub action\?\s*/m, "").replace(/\[y\/N\]\s*$/, "").trim();
+  const opts = { type: "warning" as const, buttons: ["Deny", "Approve"], defaultId: 0, cancelId: 0, message: "Approve this GitHub action?", detail };
+  const { response } = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+  return response === 1 ? "y" : "n";
+};
+
+const host = new Host(cfg, askFor);
+host.listen((msg) => {
+  for (const [id, win] of windows) {
+    if (win.isDestroyed()) continue;
+    if (msg.type === "tabs") win.webContents.send("tabs", msg.tabs.filter((t) => t.windowId === id));
+    else {
+      const tab = host.list().find((t) => t.id === msg.tabId);
+      if (tab?.windowId === id) win.webContents.send("chat-event", { tabId: msg.tabId, event: msg.event });
+    }
+  }
+});
+
+// One subscription + command check per launch, shared by every tab.
+let auth: { plan?: string; error?: string } | null = null;
+async function ensureAuth() {
+  if (auth) return auth;
+  const h = new Harness(cfg, askFor(0));
+  try {
+    auth = { plan: await h.checkAuth() };
+  } catch (err) {
+    auth = { error: (err as Error).message };
+  }
+  host.plan = auth.plan;
+  host.commands = h.commands;
+  return auth;
+}
+
+function createWindow(chatId?: string) {
   const win = new BrowserWindow({
-    width: 1240,
-    height: 820,
-    minWidth: 760,
-    minHeight: 520,
+    width: 1320,
+    height: 860,
+    minWidth: 820,
+    minHeight: 540,
     title: "Agent Harness",
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#111113" : "#fbfbfa",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0b0b0d" : "#fafaf9",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    trafficLightPosition: { x: 16, y: 18 },
+    trafficLightPosition: { x: 16, y: 16 },
     show: false,
     webPreferences: {
       preload: join(appRoot, "desktop", "preload.cjs"),
@@ -104,28 +139,15 @@ function createWindow(sessionId?: string) {
       sandbox: true,
     },
   });
-
-  // The only approval in the harness: GitHub pushes, asked with a native dialog.
-  const ask = async (question: string) => {
-    const { response } = await dialog.showMessageBox(win, {
-      type: "warning",
-      buttons: ["Deny", "Approve"],
-      defaultId: 0,
-      cancelId: 0,
-      message: "Approve this GitHub action?",
-      detail: question.replace(/^\s*⚠\s*Approve GitHub action\?\s*/m, "").replace(/\[y\/N\]\s*$/, "").trim(),
-    });
-    return response === 1 ? "y" : "n";
-  };
-
-  const harness = new Harness(cfg, ask);
-  const send = (e: ChatEvent) => !win.isDestroyed() && win.webContents.send("chat-event", e);
-  const chat = new ChatEngine(harness, send, { stream: true });
-  if (sessionId) chat.sessionId = sessionId;
-  windows.set(win.webContents.id, { win, harness, chat });
-
+  const id = win.webContents.id;
+  windows.set(id, win);
+  (win as any).__initialChat = chatId;
   win.once("ready-to-show", () => win.show());
-  win.on("closed", () => windows.delete(win.webContents.id));
+  win.on("focus", () => (lastFocused = id));
+  win.on("closed", () => {
+    windows.delete(id);
+    host.closeWindow(id);
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -135,138 +157,150 @@ function createWindow(sessionId?: string) {
     if (/^https?:/.test(url)) void shell.openExternal(url);
   });
   void win.loadFile(join(appRoot, "desktop", "renderer", "index.html"));
+  lastFocused = id;
   return win;
 }
 
-function state(sender: WebContents): WinState {
-  const s = windows.get(sender.id);
-  if (!s) throw new Error("Unknown window");
-  return s;
-}
+const wid = (sender: WebContents) => sender.id;
 
-// ── IPC ─────────────────────────────────────────────────────────────────────
-ipcMain.handle("init", async (e) => {
-  const { harness, chat } = state(e.sender);
-  if (!auth) {
+// ── memory viewers (claude-mem, Hindsight) ──────────────────────────────────
+async function firstUp(urls: string[]): Promise<{ url: string; up: boolean }> {
+  for (const url of urls) {
     try {
-      auth = { plan: await harness.checkAuth(), commands: harness.commands };
-    } catch (err) {
-      auth = { error: (err as Error).message, commands: harness.commands };
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 1200);
+      await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      return { url, up: true };
+    } catch {
+      /* try next */
     }
   }
-  if (auth.plan) harness.plan = auth.plan;
-  if (auth.commands) harness.commands = auth.commands;
-  const codex = codexStatus(cfg.root);
+  return { url: urls[0] ?? "", up: false };
+}
+
+// ── IPC: app-level ──────────────────────────────────────────────────────────
+ipcMain.handle("init", async (e) => {
+  const a = await ensureAuth();
+  const win = windows.get(wid(e.sender));
+  const initialChat = (win as any)?.__initialChat as string | undefined;
+  (win as any).__initialChat = undefined;
+  let tabs = host.list(wid(e.sender));
+  if (!tabs.length) {
+    host.createTab({ windowId: wid(e.sender), chatId: initialChat ?? process.env.HARNESS_RESUME });
+    tabs = host.list(wid(e.sender));
+  }
   return {
-    auth,
+    auth: a,
     subscriptionOnly: cfg.auth.subscription_only,
-    codex,
+    codex: codexStatus(cfg.root),
     models: cfg.models,
-    mainModel: harness.mainModel,
-    verify: harness.verifyEnabled,
     workspace: process.cwd(),
-    sessionId: chat.sessionId ?? null,
-    history: chat.sessionId ? await chat.history(chat.sessionId) : [],
-    mcpSkipped: harness.mcpSkipped,
-    plugins: harness.plugins.map((p) => p.path.split(/[\\/]/).pop()),
+    tabs,
+    mcpSkipped: new Harness(cfg, askFor(0)).mcpSkipped,
+    plugins: new Harness(cfg, askFor(0)).plugins.map((p) => p.path.split(/[\\/]/).pop()),
     designCount: loadDesignLinks(cfg.design_library).length,
-    commands: harness.commands,
+    commands: host.commands ?? [],
     runsOn: agentRunsOn(cfg),
     platform: process.platform,
   };
 });
-
 ipcMain.handle("retry-auth", () => {
   auth = null;
   return true;
 });
-
-ipcMain.handle("send", (e, text: string) => {
-  const { chat } = state(e.sender);
-  const [cmd, ...rest] = text.trim().split(/\s+/);
-  chat.send(expandShortcut(cmd, rest.join(" ")) ?? text);
-});
-
-ipcMain.handle("stop", (e) => state(e.sender).chat.stop());
-ipcMain.handle("btw", (e, q: string) => state(e.sender).chat.btw(q));
-
-ipcMain.handle("new-chat", (e) => {
-  state(e.sender).chat.newChat();
-  return true;
-});
-
-ipcMain.handle("open-chat", async (e, id: string) => {
-  const { chat } = state(e.sender);
-  if (chat.busy) throw new Error("Wait for the current turn to finish (or press Stop) before switching chats.");
-  chat.resume(id);
-  return chat.history(id);
-});
-
-ipcMain.handle("chats", (e) => state(e.sender).chat.listChats(100));
-
-ipcMain.handle("fork", async (e, title?: string) => {
-  const id = await state(e.sender).chat.fork(title || undefined);
-  createWindow(id); // each fork gets its own window
-  return id;
-});
-
-ipcMain.handle("rename", (e, title: string) => state(e.sender).chat.rename(title));
-
-ipcMain.handle("set-verify", (e, on: boolean) => {
-  state(e.sender).harness.verifyEnabled = on;
-  return on;
-});
-
-ipcMain.handle("set-model", (e, model: string) => {
-  const { harness } = state(e.sender);
-  harness.modelOverride = model || undefined;
-  return harness.mainModel;
-});
-
+ipcMain.handle("chats", () => host.chats(150));
 ipcMain.handle("design", (_e, q: string) => {
   const links = filterByPlatform(loadDesignLinks(cfg.design_library), "web", q);
   return q ? searchDesignLinks(links, q, 40) : links;
 });
-
-ipcMain.handle("agents", () =>
-  Object.entries(buildAgents(cfg)).map(([name, a]) => ({
+ipcMain.handle("agents", () => {
+  const custom = new Set(customAgentNames(cfg));
+  const runsOn = agentRunsOn(cfg);
+  return Object.entries(buildAgents(cfg)).map(([name, a]) => ({
     name,
     model: a.model,
-    runsOn: agentRunsOn(cfg)[name] ?? null,
+    runsOn: runsOn[name] ?? null,
     description: a.description,
-  })),
-);
-
-// /eval: runs the suite and streams each result into the chat as a note.
-ipcMain.handle("eval", async (e, filter: string) => {
-  const { harness, win } = state(e.sender);
-  const note = (text: string) => !win.isDestroyed() && win.webContents.send("chat-event", { type: "note", text });
-  note(`Running evals${filter ? ` matching "${filter}"` : ""}…`);
-  await runEvals(harness, filter, note);
+    custom: custom.has(name),
+  }));
 });
-
+ipcMain.handle("memory-status", async () => ({
+  claudeMem: await firstUp(cfg.memory.claude_mem),
+  hindsight: await firstUp(cfg.memory.hindsight),
+}));
 ipcMain.handle("pick-workspace", async (e) => {
-  const { win } = state(e.sender);
-  const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"], defaultPath: process.cwd() });
+  const win = windows.get(wid(e.sender));
+  const r = await dialog.showOpenDialog(win!, { properties: ["openDirectory", "createDirectory"], defaultPath: process.cwd() });
   if (r.canceled || !r.filePaths[0]) return null;
   prefs = { ...prefs, workspace: r.filePaths[0] };
   savePrefs();
   process.chdir(prefs.workspace);
-  for (const s of windows.values()) s.chat.newChat();
+  for (const t of host.list()) if (!t.busy) host.newChat(t.id);
   return prefs.workspace;
 });
-
 ipcMain.handle("open-config", () => shell.openPath(join(cfg.root, "harness.config.yaml")));
 ipcMain.handle("open-design-library", () => shell.openPath(cfg.design_library));
+ipcMain.handle("open-subagents-file", () => shell.openPath(cfg.subagents_file));
+
+// /subagents
+ipcMain.handle("subagents-design", (e, request: string) => host.harnessFor(String(host.list(wid(e.sender))[0]?.id)).designSubagents(request));
+ipcMain.handle("subagents-save", (_e, list: CustomSubagent[]) => upsertSubagents(cfg, list).map((a) => a.name));
+ipcMain.handle("subagents-remove", (_e, name: string) => removeSubagent(cfg, name));
+
+// ── IPC: per tab ────────────────────────────────────────────────────────────
+ipcMain.handle("tab-new", (e, opts: { model?: string; chatId?: string; title?: string } = {}) =>
+  host.createTab({ windowId: wid(e.sender), ...opts }),
+);
+ipcMain.handle("tab-close", (_e, tabId: string) => host.closeTab(tabId));
+ipcMain.handle("tab-focus", (_e, tabId: string) => host.focus(tabId));
+ipcMain.handle("tab-history", (_e, tabId: string) => host.history(tabId));
+ipcMain.handle("send", (_e, tabId: string, text: string) => host.send(tabId, text, "app"));
+ipcMain.handle("stop", (_e, tabId: string) => host.stop(tabId));
+ipcMain.handle("btw", (_e, tabId: string, q: string) => host.btw(tabId, q));
+ipcMain.handle("new-chat", (_e, tabId: string) => host.newChat(tabId));
+ipcMain.handle("open-chat", (_e, tabId: string, chatId: string, title?: string) => host.openChat(tabId, chatId, title));
+ipcMain.handle("rename", (_e, tabId: string, title: string) => host.rename(tabId, title));
+ipcMain.handle("set-verify", (_e, tabId: string, on: boolean) => host.setVerify(tabId, on));
+ipcMain.handle("set-model", (_e, tabId: string, model: string) => host.setModel(tabId, model));
+ipcMain.handle("fork", async (_e, tabId: string, title?: string) => {
+  const id = await host.fork(tabId, title || undefined);
+  createWindow(id); // each fork gets its own window
+  return id;
+});
+ipcMain.handle("eval", async (_e, tabId: string, filter: string) => {
+  const win = windows.get(host.get(tabId).windowId);
+  const note = (text: string) => win && !win.isDestroyed() && win.webContents.send("chat-event", { tabId, event: { type: "note", text } });
+  note(`Running evals${filter ? ` matching "${filter}"` : ""}…`);
+  await runEvals(host.harnessFor(tabId), filter, note);
+});
 
 // ── lifecycle ───────────────────────────────────────────────────────────────
 app.setName("Agent Harness");
 app.whenReady().then(() => {
-  createWindow(process.env.HARNESS_RESUME);
+  // Let the claude-mem and Hindsight viewers (localhost only) load inside the app.
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ["http://localhost/*", "http://127.0.0.1/*"] }, (details, cb) => {
+    const headers = { ...details.responseHeaders };
+    for (const k of Object.keys(headers)) {
+      if (k.toLowerCase() === "x-frame-options") delete headers[k];
+      if (k.toLowerCase() === "content-security-policy") headers[k] = headers[k]!.map((v) => v.replace(/frame-ancestors[^;]*;?/gi, ""));
+    }
+    cb({ responseHeaders: headers });
+  });
+
+  createWindow();
+  // Terminals started while the app is open attach to it.
+  startBridge(
+    host,
+    (tabId) => {
+      const win = winFor(host.get(tabId).windowId);
+      win?.webContents.send("focus-tab", tabId);
+    },
+    () => lastFocused || [...windows.keys()][0] || 0,
+  );
   app.on("activate", () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
 app.on("window-all-closed", () => process.platform !== "darwin" && app.quit());
-// Stop any running turns so no agent keeps working after the app quits.
 app.on("before-quit", () => {
-  for (const s of windows.values()) void s.chat.stop();
+  for (const t of host.list()) if (t.busy) void host.stop(t.id);
 });

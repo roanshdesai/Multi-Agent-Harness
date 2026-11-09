@@ -1,28 +1,45 @@
 // Bridge between the window and the harness. The page gets only these calls.
 const { contextBridge, ipcRenderer } = require("electron");
 
+const invoke = (ch, ...args) => ipcRenderer.invoke(ch, ...args);
+const on = (ch) => (cb) => {
+  const listener = (_e, payload) => cb(payload);
+  ipcRenderer.on(ch, listener);
+  return () => ipcRenderer.removeListener(ch, listener);
+};
+
 contextBridge.exposeInMainWorld("harness", {
-  init: () => ipcRenderer.invoke("init"),
-  retryAuth: () => ipcRenderer.invoke("retry-auth"),
-  send: (text) => ipcRenderer.invoke("send", text),
-  stop: () => ipcRenderer.invoke("stop"),
-  btw: (q) => ipcRenderer.invoke("btw", q),
-  newChat: () => ipcRenderer.invoke("new-chat"),
-  openChat: (id) => ipcRenderer.invoke("open-chat", id),
-  chats: () => ipcRenderer.invoke("chats"),
-  fork: (title) => ipcRenderer.invoke("fork", title),
-  rename: (title) => ipcRenderer.invoke("rename", title),
-  setVerify: (on) => ipcRenderer.invoke("set-verify", on),
-  setModel: (m) => ipcRenderer.invoke("set-model", m),
-  design: (q) => ipcRenderer.invoke("design", q),
-  agents: () => ipcRenderer.invoke("agents"),
-  runEval: (filter) => ipcRenderer.invoke("eval", filter),
-  pickWorkspace: () => ipcRenderer.invoke("pick-workspace"),
-  openConfig: () => ipcRenderer.invoke("open-config"),
-  openDesignLibrary: () => ipcRenderer.invoke("open-design-library"),
-  onEvent: (cb) => {
-    const listener = (_e, ev) => cb(ev);
-    ipcRenderer.on("chat-event", listener);
-    return () => ipcRenderer.removeListener("chat-event", listener);
-  },
+  // app
+  init: () => invoke("init"),
+  retryAuth: () => invoke("retry-auth"),
+  chats: () => invoke("chats"),
+  design: (q) => invoke("design", q),
+  agents: () => invoke("agents"),
+  memoryStatus: () => invoke("memory-status"),
+  pickWorkspace: () => invoke("pick-workspace"),
+  openConfig: () => invoke("open-config"),
+  openDesignLibrary: () => invoke("open-design-library"),
+  openSubagentsFile: () => invoke("open-subagents-file"),
+  designSubagents: (request) => invoke("subagents-design", request),
+  saveSubagents: (list) => invoke("subagents-save", list),
+  removeSubagent: (name) => invoke("subagents-remove", name),
+  // tabs
+  newTab: (opts) => invoke("tab-new", opts),
+  closeTab: (tabId) => invoke("tab-close", tabId),
+  focusTab: (tabId) => invoke("tab-focus", tabId),
+  tabHistory: (tabId) => invoke("tab-history", tabId),
+  send: (tabId, text) => invoke("send", tabId, text),
+  stop: (tabId) => invoke("stop", tabId),
+  btw: (tabId, q) => invoke("btw", tabId, q),
+  newChat: (tabId) => invoke("new-chat", tabId),
+  openChat: (tabId, chatId, title) => invoke("open-chat", tabId, chatId, title),
+  rename: (tabId, title) => invoke("rename", tabId, title),
+  setVerify: (tabId, on) => invoke("set-verify", tabId, on),
+  setModel: (tabId, model) => invoke("set-model", tabId, model),
+  fork: (tabId, title) => invoke("fork", tabId, title),
+  runEval: (tabId, filter) => invoke("eval", tabId, filter),
+  // pushes
+  onEvent: on("chat-event"),
+  onTabs: on("tabs"),
+  onFocusTab: on("focus-tab"),
 });

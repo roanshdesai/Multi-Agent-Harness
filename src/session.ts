@@ -10,9 +10,11 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { HarnessConfig } from "./config.js";
 import { buildAgents } from "./agents.js";
+import { designPrompt, normalize, SUBAGENT_SCHEMA, type CustomSubagent } from "./subagents.js";
 import { buildExternalMcp } from "./mcp.js";
 import { designLibraryTool } from "./tools/design-library.js";
 import { guiTestTool } from "./tools/gui-test.js";
+import { askGptTool, imageTool } from "./tools/gpt.js";
 import { pushApprovalHook, stuckDetector, type Ask } from "./guards.js";
 import { assertClaudeSubscription, subscriptionEnv } from "./subscription.js";
 import { HARNESS_COMMANDS, mergeCommands, type CommandInfo } from "./commands.js";
@@ -27,7 +29,10 @@ Delegate with the Agent tool:
 - Long pages, logs or transcripts → "summarizer" before you read them.
 - UI/visual design → "designer". It must ground work in the design_library tool.
 - Testing a UI in a browser → "gui-tester".
+- Images (generate, edit, review screenshots) → "image" (runs on GPT-6.1 Sol through Codex).
 - Video → "video".
+- The user's own subagents (from /subagents) are listed with the Agent tool. Prefer them when their description fits.
+- If the user asks for GPT or a GPT model's opinion, use mcp__harness__ask_gpt.
 - Stuck (repeated failures, unclear root cause) or a hard trade-off → "advisor" (Fable) before continuing.
 - Before presenting a worker's result as done, or before any commit, have "verifier" check it. If it says FAIL, send the fix back to the worker.
 
@@ -67,6 +72,7 @@ export interface TurnResult {
   numTurns: number;
   costUsd: number;
   agentsUsed: string[];
+  structured?: unknown;
 }
 
 export interface TurnHooks {
@@ -102,7 +108,12 @@ export class Harness {
     const local = createSdkMcpServer({
       name: "harness",
       version: "1.0.0",
-      tools: [designLibraryTool(cfg.design_library), guiTestTool(cfg.models.gui, cfg.root)],
+      tools: [
+        designLibraryTool(cfg.design_library),
+        guiTestTool(cfg.models.gui, cfg.root),
+        askGptTool(cfg.root, cfg.models.gpt),
+        imageTool(cfg.root, cfg.models.image, cfg.models.image_fallback),
+      ],
     });
     const stuck = stuckDetector(cfg);
     return {
@@ -194,10 +205,34 @@ export class Harness {
         res.numTurns = m.num_turns;
         res.costUsd = m.total_cost_usd;
         res.text = m.subtype === "success" ? m.result : `(${m.subtype})`;
+        if (m.subtype === "success") res.structured = m.structured_output;
       }
       hooks.onMessage?.(m);
     }
     return res;
+  }
+
+  /**
+   * /subagents: the Fable advisor designs subagents from a description, or,
+   * with an empty request, looks at the project and suggests some. Nothing is
+   * saved here; the caller shows the proposal and saves on approval.
+   */
+  async designSubagents(request: string): Promise<{ summary: string; subagents: CustomSubagent[] }> {
+    const cfg = this.cfg;
+    const existing = Object.entries(buildAgents(cfg)).map(([name, a]) => ({ name, description: a.description }));
+    const r = await this.run(designPrompt(request, existing, cfg), {
+      model: cfg.models.advisor,
+      effort: "high", // designing agent definitions doesn't need the advisor's deepest setting
+      persistSession: false,
+      outputFormat: { type: "json_schema", schema: SUBAGENT_SCHEMA as unknown as Record<string, unknown> },
+      disallowedTools: ["Write", "Edit", "NotebookEdit", "Bash", "Agent", "mcp__github__*", "mcp__slack__*", "mcp__outlook__*"],
+      maxTurns: 30,
+    });
+    const out = r.structured as { summary?: string; subagents?: CustomSubagent[] } | undefined;
+    if (!out?.subagents?.length) throw new Error(r.isError ? r.text : "The advisor didn't propose any subagents. Try describing what you need.");
+    const allowed = new Set([cfg.models.main, cfg.models.advisor, cfg.models.worker, cfg.models.video, ...cfg.models.gpt]);
+    const subagents = out.subagents.map((a) => normalize({ ...a, model: allowed.has(a.model) ? a.model : cfg.models.worker }));
+    return { summary: out.summary ?? "", subagents };
   }
 
   /**
