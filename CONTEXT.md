@@ -84,7 +84,7 @@ Claude in Chrome (`extensions.claude_in_chrome` passes `--chrome` to Claude Code
 
 ```bash
 npm install
-npx tsc --noEmit && npm test          # 31 unit tests
+npx tsc --noEmit && npm test          # 32 unit tests
 HARNESS_ALLOW_API=1 npm start         # only in containers without a subscription
 ```
 
@@ -92,23 +92,30 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 - **GPT without OpenAI access:** set `HARNESS_CODEX_BIN=test/fixtures/fake-codex.mjs`.
 - **Packaged build check:** `npx electron-builder --linux dir`, then launch `release/linux-unpacked/agent-harness`.
 
-## Not verified yet (needs the owner's Mac)
+## Verified on the owner's Mac (2026-11-09)
 
-- Token stats from real Codex session logs (`~/.codex/sessions`); the format was taken from Codex's rollout files and only tested with a sample.
-- ChatGPT usage from a real ChatGPT login (`account/rateLimits/read`, Codex 0.167 app server). Tested only with the fake Codex.
-- Real GPT runs through Codex. The test container can't reach OpenAI. Check that `gpt-6-astra` and `gpt-6.1-sol` are the names Codex accepts; if not, change them in `harness.config.yaml`.
+- Codex 0.167 signed in with ChatGPT (`npx codex login status`). `gpt-6-astra` and `gpt-6.1-sol` are accepted as-is; GPT tabs run two-turn chats on both and resume the thread.
+- ChatGPT usage meter reads the real plan through `codex app-server` (weekly window).
+- Token stats from real Codex logs. Codex compresses older rollouts to `.jsonl.zst` (244 of 310 on the Mac); those are now read too (fixed).
+- Claude on the subscription login (Claude Team, no API key).
+- Hindsight runs **natively, not in Docker**: launch agents `io.vectorize.hindsight-api` (API + MCP on 8888) and `io.vectorize.hindsight-ui` (UI on 9999), installed by Hindsight itself; Docker Desktop isn't installed. Start Hindsight now restarts those launch agents and only falls back to `docker compose` when they're missing (fixed). An agent session reached http://localhost:8888/mcp/ and called `list_banks`.
+- Computer use with GPT-6 Astra: `/computer test` and a real task (open Chrome, search "rikin", read the results) work. Findings and fixes:
+  - 127.0.0.1:19789 was never the computer-use helper. It's an unrelated Codex MCP server, `palmier-pro` in `~/.codex/config.toml` (PalmierPro.app), and its error shows on every Codex run. The tool blamed it for every result; now a finished task counts, and unreachable ports are named after their MCP server.
+  - Computer use itself is ChatGPT.app's `cua_repl` / `node_repl` (`computer-use@openai-bundled`, `unified-computer-use@openai-bundled`). Accessibility and Screen Recording were already granted.
+  - App access is decided by the **ChatGPT app's approvals**, not Codex's `computer_use.*` flags: Finder was refused even when listed, Chrome (approved in the ChatGPT app) worked with no flags. `codex exec` can't show the approval prompt, so the tool now tells you to approve the app in the ChatGPT app. It never operates the harness app itself, so `/computer test` tries Finder, Chrome, then Safari.
+  - The per-app `-c computer_use.macos.bundle_ids."com.x"=…` form made Codex exit; it's now one inline table.
+- Claude in Chrome: `claude-in-chrome` connects (20 tools) and the extension answers (`tabs_context_mcp`).
+- Pally: in Claude Code's user MCP list, connected and signed in; `@pally …` through the harness CLI got Pally's reply.
+- `/remote` over a real cloudflared quick tunnel (cloudflared 2026.10.5 installed): `initialize`, `tools/list`, `list_tabs` work from the public link; a wrong token gets 404.
+
+## Not verified yet
+
 - Real image generation (Codex `image_generation` feature).
-- Running on a Claude subscription login. Containers had API billing, so `HARNESS_ALLOW_API=1` was used.
 - Actually hitting the Claude usage limit; the switch to GPT is tested with a simulated limit.
-- The Mac `.dmg` and Windows installer. A Linux packaged build was tested.
-- Pally sign-in through the app's Sign in button (`claude /mcp`). The container can't reach agent.pally.com.
+- The Windows installer.
+- Pally actually using `/remote`. Pally connects to a custom MCP URL when you paste it in a Pally chat, but asked not to be given a URL with a reusable secret in the path (which is how `/remote` links work) and prefers a plain endpoint with separate bearer auth. Quick-tunnel URLs also change on every start. Open decision: add bearer-token auth (and/or a named, stable Cloudflare tunnel) to `/remote`.
 - Listing cloud (claude.ai/code) sessions inside the app: the SDK has no API for it, so the Chats pane links out.
-- Computer use on the owner's Mac failed: Codex couldn't reach its computer-use helper at 127.0.0.1:19789 (OpenAI's computer-use plugin, `computer-use@openai-bundled`). The tool now reports this plainly. Next step: get the helper running (ChatGPT/Codex desktop app with computer use on, or `codex plugin`), then `/computer test`.
-- Computer use with real GPT-6 Astra on a Mac (needs Screen Recording + Accessibility for the app/terminal) and Codex browser use through OpenAI's extension. Tested only with the fake Codex.
-- Claude in Chrome with the real extension (the claude-in-chrome server connects; the browser side needs the extension signed in).
-- /remote from Pally: depends on Pally accepting a custom MCP server URL (pally.com wasn't reachable from the container) and on cloudflared being installed for the public link.
-- Starting claude-mem with `npx claude-mem start` (the command is from its README; its docs site wasn't reachable from the container) and Hindsight via Docker on a Mac.
-- The Hindsight web UI port. 9999 is assumed; claude-mem is checked on 37701, then 37777.
+- `/computer` from inside the running app (verified through the same code path from the terminal; the app open on the Mac was an older build).
 
 ## Open bugs
 
@@ -150,12 +157,9 @@ Fixed in the last review:
 
 ## Where things stand (hand-off)
 
-Last session (cloud container, no Mac) built everything in "Features" and pushed it. What's left is checking it on the real Mac, in this order:
+Items 1–6 of the Mac check were worked through on 2026-11-09 (see "Verified on the owner's Mac"). What's left:
 
-1. **Codex/ChatGPT:** `npx codex login status` should say ChatGPT. Then GPT tabs, the ChatGPT usage meter, and whether Codex accepts the model names `gpt-6-astra` / `gpt-6.1-sol` (fix them in `/models` if not).
-2. **Hindsight:** Docker Desktop must be running. In the app: Memory → Hindsight → Start Hindsight. (Fixed: it used to look for docker-compose.yml only in `~/.agent-harness`; it now also uses the one in the app's folder, and `.env` is optional.) Check `docker ps` shows the hindsight container and http://localhost:9999 opens. Agents reach it at `memory.hindsight_mcp` (http://localhost:8888/mcp/).
-3. **claude-mem:** was running on the Mac (viewer on http://localhost:37701). Nothing to do unless it stops.
-4. **Computer use (GPT-6 Astra via Codex):** failed because Codex's computer-use helper on 127.0.0.1:19789 wasn't running. It belongs to OpenAI's computer-use plugin (`computer-use@openai-bundled`, likely provided by the ChatGPT/Codex desktop app), not to this repo. Check `npx codex plugin list`, `npx codex doctor`, `lsof -i :19789`; turn computer use on in the ChatGPT/Codex app (Screen Recording + Accessibility); then `/computer test` in the harness. All apps are allowed (`computer_use.default_app_access: allow`).
-5. **Claude in Chrome:** install the extension, sign in, restart the app; `claude-in-chrome` should show in Apps.
-6. **Pally:** add it in Apps (name `pally`, URL `https://agent.pally.com/mcp`), Sign in if it needs auth, then try `@pally …`. For `/remote`: `brew install cloudflared`, turn on `/remote`, Get a public link, add that link in Pally as an MCP server.
-7. **Packaging:** `npm run desktop:mac` builds the .dmg (untested).
+1. **Packaging:** `npm run desktop:mac` (see the latest notes below for its result).
+2. **Pally + /remote:** decide on bearer auth / a stable tunnel (see "Not verified yet"), then add the link in Pally.
+3. **Computer use:** approve any other apps you want GPT to use in the ChatGPT app (Finder isn't approved yet).
+4. Optional clean-up outside this repo: `palmier-pro` in `~/.codex/config.toml` fails on every Codex run (turn it off if PalmierPro isn't used), and the `cardboard` skill's SKILL.md has invalid YAML for Codex.
