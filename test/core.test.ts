@@ -448,7 +448,7 @@ test("ChatGPT usage: read from Codex's app server and shown like Claude's", asyn
   delete process.env.HARNESS_CODEX_BIN;
 });
 
-test("token stats: daily totals from Claude Code and Codex transcripts", async () => {
+test("token stats: daily totals from Claude Code and Codex transcripts (plain and .zst)", async () => {
   const { tokenStats } = await import("../src/token-stats.js");
   const home = mkdtempSync(join(tmpdir(), "home-"));
   const cdir = join(home, "claude", "projects", "-proj");
@@ -472,6 +472,12 @@ test("token stats: daily totals from Claude Code and Codex transcripts", async (
     JSON.stringify({ timestamp: ts2, type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 1000, cached_input_tokens: 600, output_tokens: 100 } } } }),
     JSON.stringify({ timestamp: ts2, type: "event_msg", payload: { type: "token_count", info: null } }),
   ].join("\n"));
+  // Codex compresses older rollouts to .jsonl.zst; those count too.
+  const { zstdCompressSync } = await import("node:zlib");
+  writeFileSync(join(gdir, "rollout-2.jsonl.zst"), zstdCompressSync(Buffer.from([
+    JSON.stringify({ timestamp: ts2, type: "turn_context", payload: { model: "gpt-6.1-sol" } }),
+    JSON.stringify({ timestamp: ts2, type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 300, cached_input_tokens: 100, output_tokens: 50 } } } }),
+  ].join("\n"))));
   process.env.CLAUDE_CONFIG_DIR = join(home, "claude");
   process.env.CODEX_HOME = join(home, "codex");
   const root = mkdtempSync(join(tmpdir(), "root-"));
@@ -480,8 +486,8 @@ test("token stats: daily totals from Claude Code and Codex transcripts", async (
     const d1 = Object.keys(s.days).find((d) => s.days[d].claude)!;
     assert.deepEqual(s.days[d1].claude, { "claude-opus-5-5": 160, "claude-sonnet-5-5": 25, "claude-fable-5-1": 10 });
     const d2 = Object.keys(s.days).find((d) => s.days[d].gpt)!;
-    assert.deepEqual(s.days[d2].gpt, { "gpt-6-astra": 500 });
-    assert.deepEqual(s.sessions, { claude: 1, gpt: 1 }); // subagent file isn't a separate session
+    assert.deepEqual(s.days[d2].gpt, { "gpt-6-astra": 500, "gpt-6.1-sol": 250 });
+    assert.deepEqual(s.sessions, { claude: 1, gpt: 2 }); // subagent file isn't a separate session
     const again = await tokenStats(root); // second read comes from the cache
     assert.deepEqual(again.days, s.days);
   } finally {

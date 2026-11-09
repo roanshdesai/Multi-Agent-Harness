@@ -2,6 +2,8 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, sta
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
+import { pipeline } from "node:stream";
+import * as zlib from "node:zlib";
 
 /**
  * Token usage over time, like Claude Code's /stats: read from the transcripts
@@ -10,7 +12,8 @@ import { join, sep } from "node:path";
  * - Claude: ~/.claude/projects/**\/*.jsonl (or $CLAUDE_CONFIG_DIR), one usage
  *   block per assistant message (deduplicated by message id).
  * - ChatGPT: ~/.codex/sessions/**\/*.jsonl (or $CODEX_HOME), one token_count
- *   event per turn.
+ *   event per turn. Codex compresses older rollouts to .jsonl.zst; those are
+ *   read too (zstd needs Node 22.15+/Electron 36+, otherwise they're skipped).
  *
  * Tokens counted = input + cache writes + output. Cache reads are left out:
  * they re-read the same context every turn and would swamp the real work.
@@ -57,7 +60,7 @@ function* jsonlFiles(dir: string, depth = 6): Generator<string> {
   for (const e of entries) {
     const p = join(dir, e.name);
     if (e.isDirectory()) yield* jsonlFiles(p, depth - 1);
-    else if (e.name.endsWith(".jsonl")) yield p;
+    else if (e.name.endsWith(".jsonl") || (e.name.endsWith(".jsonl.zst") && zstd)) yield p;
   }
 }
 
@@ -68,8 +71,15 @@ const add = (days: DayModel, day: string, model: string, n: number) => {
 };
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
+/** zstd decompression, when this Node has it (Codex writes .jsonl.zst rollouts). */
+const zstd = (zlib as { createZstdDecompress?: () => NodeJS.ReadWriteStream }).createZstdDecompress;
+
 async function readLines(file: string, fn: (o: any) => void) {
-  const rl = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
+  const raw = createReadStream(file);
+  // pipeline passes a read or decompression error on to the last stream, so the caller's catch sees it.
+  const input = file.endsWith(".zst") && zstd ? (pipeline(raw, zstd(), () => {}) as NodeJS.ReadableStream) : raw;
+  input.setEncoding("utf8");
+  const rl = createInterface({ input, crlfDelay: Infinity });
   for await (const line of rl) {
     if (!line.startsWith("{")) continue;
     try {
