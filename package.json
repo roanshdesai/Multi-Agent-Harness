@@ -12,7 +12,7 @@
     "test": "tsx --test test/*.test.ts",
     "desktop": "tsc && electron .",
     "desktop:dist": "tsc && electron-builder",
-    "desktop:mac": "tsc && electron-builder --mac",
+    "desktop:mac": "tsc && electron-builder --mac && node scripts/drop-unpacked.mjs",
     "desktop:win": "tsc && electron-builder --win"
   },
   "dependencies": {
