@@ -43,6 +43,7 @@ src/engine.ts        ChatEngine (one Claude chat): turns, queue, verifier loop, 
 src/gpt-chat.ts      GptChat: the same Engine interface over Codex; transcripts in .harness/gpt-chats
 src/codex.ts         runCodex(): `codex exec --json`, parses thread/item/turn events
 src/remote.ts        /remote: MCP server (Streamable HTTP, JSON replies) on 127.0.0.1:remote.port, secret in the URL, optional cloudflared quick tunnel; tools list_tabs/send_message/get_reply/read_chat/answer_question/stop/usage
+src/projects.ts     Projects (projects.yaml in the data folder): groups → projects → sub-projects; bankFor(cwd) picks the Hindsight bank, bankMcpUrl() its single-bank MCP address
 src/memory.ts        Start claude-mem (`npx claude-mem start`, doctor) and Hindsight (`docker compose up -d hindsight`) from the app; claude-mem port from ~/.claude-mem/settings.json
 src/token-stats.ts   Token usage over time for the home screen: Claude Code + Codex transcripts, cached per file
 src/codex-usage.ts   ChatGPT plan usage: `codex app-server`, initialize, then account/rateLimits/read
@@ -121,6 +122,14 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 
 - The packaged app showed no Hindsight dot and agents had no Hindsight address: `~/.agent-harness/harness.config.yaml` was an early copy without `memory:` (or `computer_use:`, `extensions:`, `remote:`). The packaged app now fills missing settings from its bundled config (`loadConfig(root, defaultsFile)`, `withDefaults`); the user's values and lists win, and the file isn't rewritten. The owner confirmed Hindsight opens in the app.
 - Opening the app while a copy ran without a window (macOS keeps it alive) quit the new copy and showed nothing. The running copy now opens a window on `second-instance`.
+
+## Projects and per-project memory (2026-11-09)
+
+- Sidebar Projects tab (default pane): groups → projects → sub-projects, stored in `projects.yaml` in the data folder (gitignored in the repo, since it holds personal paths). The owner's list is set up on the Mac.
+- Each Harness connects to `memory.hindsight_mcp` + `<bank>/` for its folder: single-bank mode, no `list_banks`, `recall` has no `bank_id`. Verified with an MCP client.
+- Default bank = what the Hindsight coding-agent plugin uses (`coding-agent::<repo>`, worktrees → main repo, its `mapPathToBank` first). Worktrees that should have their own memory get a `mapPathToBank` entry in `~/.hindsight/coding-agent.json` and `bank:` in projects.yaml, so Claude Code and the harness agree.
+- Seeding a repo into Hindsight: `node ~/.hindsight/coding-agents/dist/hindsight-seed.js seed --repo <dir>`. Hindsight's LLM on the Mac is `claude-code` (subscription). Renaming a bank id in place: `hindsight-admin rename-bank --from <id> --to <id>`.
+- Memory probe fix: the sidebar showed Hindsight as stopped while it was busy, because the check followed the UI's redirect to a slow dashboard with a 1.2s limit. It no longer follows redirects and waits 3s.
 
 ## Open bugs
 

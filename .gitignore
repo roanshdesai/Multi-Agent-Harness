@@ -9,3 +9,6 @@ out/
 mcp-servers.json
 *.local.yaml
 e2e.png
+
+# Your projects (folders on this computer)
+projects.yaml

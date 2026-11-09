@@ -1,5 +1,6 @@
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import type { HarnessConfig } from "./config.js";
+import { bankFor, bankMcpUrl } from "./projects.js";
 
 const env = (k: string) => process.env[k] ?? "";
 
@@ -7,7 +8,7 @@ const env = (k: string) => process.env[k] ?? "";
  * External MCP servers. A server is only added when it is enabled in the
  * config AND its credentials are present, so a missing key never breaks startup.
  */
-export function buildExternalMcp(cfg: HarnessConfig): {
+export function buildExternalMcp(cfg: HarnessConfig, opts: { cwd?: string } = {}): {
   servers: Record<string, McpServerConfig>;
   skipped: string[];
 } {
@@ -45,7 +46,8 @@ export function buildExternalMcp(cfg: HarnessConfig): {
   // Hindsight: .env's HINDSIGHT_MCP_URL, else memory.hindsight_mcp in harness.config.yaml.
   const hindsightUrl = env("HINDSIGHT_MCP_URL") || cfg.memory?.hindsight_mcp || "";
   if (cfg.mcp.hindsight && !hindsightUrl) skipped.push("hindsight (set memory.hindsight_mcp in harness.config.yaml)");
-  else if (cfg.mcp.hindsight) servers.hindsight = { type: "http", url: hindsightUrl };
+  // With a working folder, agents get only that project's bank (Hindsight's /mcp/<bank>/ address).
+  else if (cfg.mcp.hindsight) servers.hindsight = { type: "http", url: opts.cwd ? bankMcpUrl(hindsightUrl, bankFor(cfg, opts.cwd)) : hindsightUrl };
 
   add("firecrawl", ["FIRECRAWL_API_KEY"], {
     command: "npx",

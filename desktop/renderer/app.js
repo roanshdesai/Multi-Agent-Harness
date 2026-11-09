@@ -15,7 +15,9 @@ let connState = [];
 let memStatus = null;
 let usageState = null;
 let slashIndex = 0;
-let pane = "chats";
+let pane = "projects";
+/** Projects in groups, each with its own folder, chats and Hindsight memory. */
+let projectsState = { groups: [], current: null, count: 0 };
 const collapsed = new Set();
 
 /** tabId → tab state. Chat tabs mirror the host; document and memory tabs are local. */
@@ -915,7 +917,9 @@ function tickTo(node, key, value, format) {
 function renderStatus() {
   const s = cur();
   const folder = (info?.workspace ?? "").split(/[\\/]/).pop();
-  $("wsName").textContent = folder || "…";
+  const proj = projectName();
+  $("wsLabel").textContent = proj ? "Project" : "Workspace";
+  $("wsName").textContent = proj ?? (folder || "…");
   $("sbFolder").title = `${info?.workspace ?? ""}\nClick to change the folder the agents work in`;
   const chat = s?.type === "chat";
   // context
@@ -1190,16 +1194,17 @@ async function connectCodex() {
 }
 
 // ── sidebar panes ──────────────────────────────────────────────────────────
-const PANES = { chats: "Chats", docs: "Documents", memory: "Memory", connections: "MCP servers & apps", team: "Team" };
+const PANES = { projects: "Projects", chats: "Chats", docs: "Documents", memory: "Memory", connections: "MCP servers & apps", team: "Team" };
 function setPane(p) {
   pane = p;
   document.querySelectorAll(".seg[data-pane]").forEach((b) => b.classList.toggle("active", b.dataset.pane === p));
   $("paneSearch").value = "";
-  $("paneSearch").placeholder = p === "docs" ? "Search documents" : p === "chats" ? "Search chats (⌘K)" : "Filter";
+  $("paneSearch").placeholder = p === "docs" ? "Search documents" : p === "chats" ? "Search chats (⌘K)" : p === "projects" ? "Find a project" : "Filter";
   renderPane();
   if (p === "docs") refreshDocs();
   if (p === "connections" && !connState.length) refreshConnections();
   if (p === "memory") refreshMemory();
+  if (p === "projects") refreshProjects();
 }
 document.querySelectorAll(".seg[data-pane]").forEach((b) => (b.onclick = () => setPane(b.dataset.pane)));
 $("newTaskBtn").onclick = () => newTab();
@@ -1233,7 +1238,32 @@ function renderPane() {
   body.textContent = "";
   const q = $("paneSearch").value.trim().toLowerCase();
   const match = (t) => !q || String(t).toLowerCase().includes(q);
-  if (pane === "chats") {
+  if (pane === "projects") {
+    paneActions([["plus", "Add a project", () => editProject()], ["refresh", "Refresh", () => refreshProjects()]]);
+    const { groups, current } = projectsState;
+    if (!groups.length) {
+      body.appendChild(el("div", "empty-pane", "No projects yet. Add one: it points at a folder and gets its own chats and memory."));
+      return;
+    }
+    const hits = (p) => match(p.name) || match(p.path) || (p.children ?? []).some(hits);
+    const row = (p, depth, groupName, parentPath) => {
+      if (q && !hits(p)) return;
+      const r = el("button", `row project-row${p.path === current ? " active" : ""}${p.exists ? "" : " missing"}`);
+      r.style.paddingLeft = `${12 + depth * 14}px`;
+      const st = el("span", "stack");
+      st.append(el("span", "t", p.name), el("span", "sub", p.exists ? shortPath(p.path) : "folder not found"));
+      r.append(icon("folder"), st);
+      if (p.path === current) r.append(el("span", "rmeta", "open"));
+      r.title = `${p.path}\nMemory: ${p.resolvedBank}\nRight-click to edit`;
+      r.onclick = () => openProject(p);
+      r.oncontextmenu = (e) => (e.preventDefault(), editProject({ project: p, group: groupName, parent: parentPath }));
+      body.appendChild(r);
+      for (const c of p.children ?? []) row(c, depth + 1, groupName, p.path);
+    };
+    const count = (list) => list.reduce((n, p) => n + 1 + count(p.children ?? []), 0);
+    for (const g of groups) section(body, `projects:${g.name}`, g.name, count(g.projects), () => g.projects.forEach((p) => row(p, 0, g.name, null)));
+    body.appendChild(el("div", "pane-note", "Each project has its own memory. Right-click one to rename, move or remove it."));
+  } else if (pane === "chats") {
     paneActions([["plus", "New task (⌘T)", () => newTab()], ["refresh", "Refresh", () => refreshChats()]]);
     const open = new Set([...tabs.values()].filter((t) => t.type === "chat" && t.info.sessionId).map((t) => t.info.sessionId));
     const sid = cur()?.info?.sessionId;
@@ -1290,7 +1320,8 @@ function renderPane() {
       const st = memStatus?.[key];
       const r = el("button", `row${cur()?.type === "memory" && cur().mem === key ? " active" : ""}`);
       const stack = el("span", "stack");
-      stack.append(el("span", "t", name), el("span", "sub", st?.up ? st.url : `${sub} · not running`));
+      const where = key === "hindsight" && st?.bank ? `${projectName() ?? folderName(info?.workspace)} · ${st.bank}` : st?.url;
+      stack.append(el("span", "t", name), el("span", "sub", st?.up ? where : `${sub} · not running`));
       r.append(el("span", `dot ${st?.up ? "ok" : ""}`), stack);
       r.onclick = () => openMemory(key);
       body.appendChild(r);
@@ -1352,6 +1383,11 @@ function renderPane() {
 async function refreshChats() {
   allChats = await api.chats();
   if (pane === "chats") renderPane();
+}
+async function refreshProjects() {
+  projectsState = await api.projects();
+  renderStatus();
+  if (pane === "projects") renderPane();
 }
 async function refreshDocs() {
   docs = await api.docs();
@@ -1505,16 +1541,22 @@ const MEM = {
   },
   hindsight: {
     title: "Hindsight",
-    start: ["Long-term memory, run in Docker from this project's docker-compose.yml. Docker Desktop has to be open. The first start downloads it, which can take a few minutes.", "Its web UI address is set under memory.hindsight in harness.config.yaml."],
+    start: ["Long-term memory. Each project has its own memory bank. On a Mac where Hindsight is installed, Start runs its own background services; otherwise it runs in Docker from docker-compose.yml (Docker has to be open, and the first start downloads it).", "Its web UI address is set under memory.hindsight in harness.config.yaml."],
     button: "Start Hindsight",
   },
 };
 async function openMemory(key) {
-  for (const [id, t] of tabs) if (t.type === "memory" && t.mem === key) return activate(id);
   await refreshMemory();
   const st = memStatus[key];
-  const s = addLocalTab("memory", MEM[key].title, { mem: key });
+  // Hindsight opens on the current project's bank; a tab showing another project's bank is replaced.
+  for (const [id, t] of tabs) {
+    if (t.type !== "memory" || t.mem !== key) continue;
+    if (key !== "hindsight" || t.bank === st.bank) return activate(id);
+    await closeTab(id);
+  }
+  const s = addLocalTab("memory", key === "hindsight" && st.bank ? `Hindsight · ${projectName() ?? folderName(info?.workspace)}` : MEM[key].title, { mem: key, bank: st.bank });
   if (st.up) {
+    st.url = st.bankUrl ?? st.url;
     const wrap = el("div", "doc-wrap");
     const head = el("div", "doc-head");
     const reload = el("button", "btn sm", "Reload");
@@ -1550,7 +1592,7 @@ async function openMemory(key) {
       start.disabled = true;
       status.className = "muted";
       status.textContent = "";
-      status.append(el("span", "spin"), document.createTextNode(key === "hindsight" ? " Starting Hindsight in Docker…" : " Starting claude-mem…"));
+      status.append(el("span", "spin"), document.createTextNode(key === "hindsight" ? " Starting Hindsight…" : " Starting claude-mem…"));
       const r = await api.memoryStart(key).catch((err) => ({ ok: false, detail: err.message }));
       start.disabled = false;
       if (r.up) return reopen();
@@ -1997,16 +2039,182 @@ $("chatTitle").ondblclick = () => {
   };
   t.onblur = () => done(true);
 };
-$("sbFolder").onclick = async () => {
-  const ws = await api.pickWorkspace();
-  if (!ws) return;
+/** After the agents' folder changes: idle tabs start fresh there, with that folder's chats, docs and memory. */
+async function workspaceChanged(ws) {
   info.workspace = ws;
   for (const s of tabs.values()) if (s.type === "chat" && !s.info.busy) clearView(s);
-  renderStatus();
+  await refreshProjects();
   await refreshChats();
   refreshDocs();
+  refreshMemory();
   refreshWelcomes();
+}
+$("sbFolder").onclick = async () => {
+  const ws = await api.pickWorkspace();
+  if (ws) await workspaceChanged(ws);
 };
+
+// ── projects ───────────────────────────────────────────────────────────────
+function findProject(list, path) {
+  for (const p of list ?? []) {
+    if (p.path === path) return p;
+    const c = findProject(p.children, path);
+    if (c) return c;
+  }
+  return null;
+}
+/** Name of the project the agents are working in, with its parent (e.g. "Kee · Meta Ray-Bans"). */
+function projectName() {
+  const cur = projectsState.current;
+  if (!cur) return null;
+  for (const g of projectsState.groups) {
+    const walk = (list, parent) => {
+      for (const p of list) {
+        if (p.path === cur) return parent ? `${parent} · ${p.name}` : p.name;
+        const c = walk(p.children ?? [], p.name);
+        if (c) return c;
+      }
+      return null;
+    };
+    const n = walk(g.projects, null);
+    if (n) return n;
+  }
+  return null;
+}
+function shortPath(p) {
+  const home = info?.home;
+  return home && p.startsWith(home) ? "~" + p.slice(home.length) : p;
+}
+async function openProject(p) {
+  if (!p.exists) return editProject({ project: p, group: null, parent: null, note: "This project's folder wasn't found. Choose where it is now." });
+  try {
+    const ws = await api.openProject(p.path);
+    await workspaceChanged(ws);
+  } catch (err) {
+    modal("Project", el("p", "error-text", String(err.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "")));
+  }
+}
+/** Plain copy of the projects without the app's extra fields, for saving. */
+function plainProjects() {
+  const strip = (p) => ({ name: p.name, path: p.path, ...(p.bank && { bank: p.bank }), ...(p.children?.length && { children: p.children.map(strip) }) });
+  return { groups: projectsState.groups.map((g) => ({ name: g.name, projects: g.projects.map(strip) })) };
+}
+/** Add a project, or edit one (rename, change folder or memory bank, move to another group or parent, remove). */
+function editProject(ctx = {}) {
+  const editing = ctx.project ?? null;
+  const box = el("div", "sub-form project-form");
+  if (ctx.note) box.appendChild(el("p", "muted", ctx.note));
+  const field = (label, input, hint) => {
+    const f = el("label", "field");
+    f.append(el("span", "field-k", label), input);
+    if (hint) f.append(el("span", "field-hint", hint));
+    box.appendChild(f);
+    return input;
+  };
+  const name = field("Name", el("input", "input"));
+  name.value = editing?.name ?? "";
+  name.placeholder = "e.g. Meta Ray-Bans";
+  const groupIn = field("Group", el("input", "input"), "Pick one or type a new group name.");
+  const groupList = el("datalist");
+  groupList.id = "projectGroups";
+  for (const g of projectsState.groups) groupList.appendChild(Object.assign(document.createElement("option"), { value: g.name }));
+  box.appendChild(groupList);
+  groupIn.setAttribute("list", "projectGroups");
+  groupIn.value = ctx.group ?? projectsState.groups[0]?.name ?? "Personal";
+  const parentSel = field("Inside", el("select", "input"), "Put it under another project, like Kee → Meta Ray-Bans.");
+  const fillParents = () => {
+    parentSel.textContent = "";
+    parentSel.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: "Nothing (top of the group)" }));
+    const g = projectsState.groups.find((x) => x.name === groupIn.value.trim());
+    const walk = (list, depth) => {
+      for (const p of list) {
+        if (editing && p.path === editing.path) continue; // not inside itself
+        parentSel.appendChild(Object.assign(document.createElement("option"), { value: p.path, textContent: `${"  ".repeat(depth)}${p.name}` }));
+        walk(p.children ?? [], depth + 1);
+      }
+    };
+    walk(g?.projects ?? [], 0);
+    parentSel.value = ctx.parent ?? "";
+  };
+  groupIn.oninput = fillParents;
+  fillParents();
+  const folderRow = el("div", "folder-pick");
+  const folder = el("input", "input mono");
+  folder.readOnly = true;
+  folder.value = editing?.path ?? "";
+  folder.placeholder = "No folder chosen";
+  const choose = el("button", "btn sm", "Choose…");
+  choose.onclick = async () => {
+    const dir = await api.pickFolder();
+    if (!dir) return;
+    folder.value = dir;
+    if (!name.value.trim()) name.value = folderName(dir);
+  };
+  folderRow.append(folder, choose);
+  field("Folder", folderRow, "Agents work here. Nothing on disk is moved.");
+  const bank = field("Memory bank", el("input", "input mono"), editing ? `Now: ${editing.resolvedBank}. Leave empty to use the folder's own bank (the one Claude Code uses too).` : "Leave empty to use the folder's own bank (the one Claude Code uses too).");
+  bank.value = editing?.bank ?? "";
+  bank.placeholder = "coding-agent::<folder>";
+  const msg = el("p", "error-text");
+  const acts = el("div", "row-actions");
+  const save = el("button", "btn primary", editing ? "Save" : "Add project");
+  acts.appendChild(save);
+  if (editing) {
+    const rm = el("button", "btn danger", "Remove from list");
+    rm.title = "Removes it from the sidebar only. The folder and its memory stay.";
+    rm.onclick = async () => {
+      const data = plainProjects();
+      for (const g of data.groups) removeFrom(g.projects, editing.path);
+      data.groups = data.groups.filter((g) => g.projects.length);
+      projectsState = await api.saveProjects(data);
+      $("modal").hidden = true;
+      renderStatus();
+      renderPane();
+    };
+    acts.appendChild(rm);
+  }
+  box.append(msg, acts);
+  save.onclick = async () => {
+    const path = folder.value.trim();
+    const groupName = groupIn.value.trim() || "Projects";
+    if (!path) return (msg.textContent = "Choose the project's folder.");
+    const data = plainProjects();
+    let moved = null;
+    if (editing) for (const g of data.groups) moved ??= removeFrom(g.projects, editing.path);
+    const proj = { ...(moved ?? {}), name: name.value.trim() || folderName(path), path };
+    if (bank.value.trim()) proj.bank = bank.value.trim();
+    else delete proj.bank;
+    let g = data.groups.find((x) => x.name === groupName);
+    if (!g) data.groups.push((g = { name: groupName, projects: [] }));
+    const parent = parentSel.value ? findProject(g.projects, parentSel.value) : null;
+    if (parent) (parent.children ??= []).push(proj);
+    else g.projects.push(proj);
+    data.groups = data.groups.filter((x) => x.projects.length);
+    try {
+      projectsState = await api.saveProjects(data);
+    } catch (err) {
+      return (msg.textContent = String(err.message ?? err));
+    }
+    $("modal").hidden = true;
+    renderStatus();
+    renderPane();
+  };
+  modal(editing ? `Edit ${editing.name}` : "Add a project", box);
+  (editing ? name : folder.value ? name : choose).focus();
+}
+/** Remove the project at `path` from a list (searching children too); returns it. */
+function removeFrom(list, path) {
+  const i = list.findIndex((p) => p.path === path);
+  if (i >= 0) return list.splice(i, 1)[0];
+  for (const p of list) {
+    const r = removeFrom(p.children ?? [], path);
+    if (r) {
+      if (!p.children.length) delete p.children;
+      return r;
+    }
+  }
+  return null;
+}
 
 // ── composer & commands ────────────────────────────────────────────────────
 function autoSize() {
@@ -2258,6 +2466,7 @@ async function start() {
     $("blocker").hidden = false;
   }
   buildModelSelect();
+  await refreshProjects();
   await refreshChats();
   for (const t of info.tabs) ensureChatTab(t);
   activate(info.tabs[info.tabs.length - 1].id);

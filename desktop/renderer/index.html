@@ -16,14 +16,15 @@
       <aside class="sidebar">
         <div class="side-top">
           <button class="workspace" id="sbFolder" title="Change the folder the agents work in">
-            <span class="ws-label">Workspace</span>
+            <span class="ws-label" id="wsLabel">Workspace</span>
             <span class="ws-name" id="wsName">…</span>
           </button>
           <button class="new-task" id="newTaskBtn" title="New task (⌘T)"><span>New task</span><kbd>⌘T</kbd></button>
         </div>
 
         <nav class="library" aria-label="Library">
-          <button class="seg active" data-pane="chats">Chats</button>
+          <button class="seg active" data-pane="projects">Projects</button>
+          <button class="seg" data-pane="chats">Chats</button>
           <button class="seg" data-pane="docs">Docs</button>
           <button class="seg" data-pane="memory">Memory</button>
           <button class="seg" data-pane="connections">Apps<span class="seg-badge" id="connBadge" hidden></span></button>

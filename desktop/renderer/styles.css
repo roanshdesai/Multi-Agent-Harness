@@ -463,3 +463,13 @@ a { color: inherit; text-decoration-color: var(--ink-3); text-underline-offset: 
 .awake { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); -webkit-app-region: no-drag; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); background: none; color: var(--amber); font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; border-radius: 3px; padding: 1px 6px; }
 .awake:hover { border-color: var(--amber); }
 body.platform-win.has-awake .titlebar, body.platform-linux.has-awake .titlebar { display: flex; }
+
+/* projects */
+.project-row.missing .t, .project-row.missing svg { color: var(--ink-3); }
+.project-row.missing .sub { color: var(--amber); }
+.pane-note { padding: 10px 12px 4px; color: var(--ink-3); font-size: 11.5px; line-height: 1.45; }
+.project-form { min-width: 420px; }
+.field { display: grid; gap: 4px; }
+.field-k { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.field-hint { color: var(--ink-3); font-size: 11.5px; }
+.folder-pick { display: flex; gap: 8px; align-items: center; }

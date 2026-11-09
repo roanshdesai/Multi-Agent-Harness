@@ -256,7 +256,8 @@ export class Harness {
       effort: cfg.effort.main,
       systemPrompt: { type: "preset", preset: "claude_code", append: ORCHESTRATOR_PROMPT },
       agents: buildAgents(cfg),
-      mcpServers: { harness: local, ...buildExternalMcp(cfg).servers, ...loadCustomServers(cfg) },
+      // Hindsight is scoped to this harness's folder: each project has its own memory bank.
+      mcpServers: { harness: local, ...buildExternalMcp(cfg, { cwd: this.cwd }).servers, ...loadCustomServers(cfg) },
       // Like Claude Code: the working model consults a stronger advisor on its own when it hits something hard.
       ...(cfg.advisor.auto && { settings: { advisorModel: cfg.models.advisor } }),
       // Only AskUserQuestion reaches this under bypassPermissions: the agent asking you something.

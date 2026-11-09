@@ -47,7 +47,7 @@ Its own look, built to read like a document and an instrument:
 - **Type:** a sans-serif for prose and monospace for anything that is data: models, counts, paths, labels.
 - **Colour:** dark graphite with one cool signal accent for focus and primary actions. Each model family gets one quiet mark: clay for Claude, moss for GPT, plum for the advisor. Dense spacing, hairline rules, no gradients, glows or glass.
 - **Agent work:** shown as a timeline on a thin line, not as boxes.
-- **Sidebar:** the workspace, then text-label sections (Chats · Docs · Memory · Apps · Team), with an instrument panel at the bottom showing the context grid, Claude usage and ChatGPT.
+- **Sidebar:** the current project, then text-label sections (Projects · Chats · Docs · Memory · Apps · Team), with an instrument panel at the bottom showing the context grid, Claude usage and ChatGPT.
 - **References:** GitHub, VS Code and Vercel informed how it works, not how it looks.
 - **From the UI links library, used sparingly:** a progressive blur under the header (Glur, done for the web), numbers that tick when they change and steps that ease in (Magic UI), and small press and hover details (Design Spells).
 
@@ -62,6 +62,8 @@ Its own look, built to read like a document and an instrument:
 **Claude or GPT per tab:** the model picker at the top lists the Claude models your plan offers and the GPT models from your settings (ChatGPT plan, through Codex). Change any role's model, or what the picker offers, with `/models` or "Edit models…" at the bottom of the picker. Switching a tab that already has a conversation to the other family opens a new tab, since they can't share history.
 
 **Terminal link:** while the app is open, `npm start` in a terminal joins the same tabs. Messages typed in either show in both; the app marks terminal messages "from terminal". `/tabs`, `/tab <n>` and `/detach` work in the linked terminal. If the app closes, the terminal carries on by itself.
+
+**Projects:** the sidebar's Projects tab groups your folders (for example Kee Makr → Kee → Meta Ray-Bans, and Personal). Clicking a project makes its folder the one agents work in, shows that folder's chats, and switches memory: each project has its own Hindsight bank, and agents connect to it through Hindsight's single-bank address (`/mcp/<bank>/`), so one project never sees another's memory. By default a project uses the bank Hindsight's Claude Code plugin gives the folder (`coding-agent::<repo>`, or its `mapPathToBank` entry in `~/.hindsight/coding-agent.json`), so the harness and Claude Code share it. Add a project with +, right-click one to rename it, move it under another, change its folder or bank, or remove it from the list. Nothing on disk is moved. The list lives in `projects.yaml` in the data folder.
 
 **Memory in the sidebar:** claude-mem and Hindsight open as tabs showing their own viewers, so you can browse and organize what they've stored. A green dot means it's running; otherwise the tab shows how to start it. Addresses are under `memory:` in `harness.config.yaml`.
 

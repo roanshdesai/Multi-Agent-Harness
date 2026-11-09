@@ -716,3 +716,41 @@ test("config: an older data-folder config gets missing sections from the bundled
   assert.equal(cfg.mcp.github, true);
   assert.deepEqual(loadConfig(root).memory.hindsight, []); // without defaults: as before
 });
+
+test("projects: groups and sub-projects, each folder with its own Hindsight bank", async () => {
+  const { loadConfig } = await import("../src/config.js");
+  const { saveProjects, loadProjects, projectFor, bankFor, defaultBank, bankMcpUrl, bankPageUrl, flattenProjects } = await import("../src/projects.js");
+  const { buildExternalMcp } = await import("../src/mcp.js");
+  const { execFileSync } = await import("node:child_process");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const base = mkdtempSync(join(tmpdir(), "dev-"));
+  const kee = join(base, "kee-clients");
+  const glasses = join(base, "kee-clients-glasses");
+  const loose = join(base, "scratch");
+  for (const d of [kee, glasses, loose]) mkdirSync(d, { recursive: true });
+  execFileSync("git", ["init", "-q", kee]);
+  assert.deepEqual(loadProjects(cfg), { groups: [] }); // no file yet
+  saveProjects(cfg, {
+    groups: [{ name: "Kee Makr", projects: [{ name: "Kee", path: kee, children: [{ name: "Meta Ray-Bans", path: glasses, bank: "kee-glasses" }] }] }],
+  });
+  const data = loadProjects(cfg);
+  assert.deepEqual(flattenProjects(data).map((x) => [x.project.name, x.trail.join(" > ")]), [["Kee", "Kee Makr"], ["Meta Ray-Bans", "Kee Makr > Kee"]]);
+  assert.equal(projectFor(data, join(kee, "src"))?.name, "Kee"); // a folder inside the project
+  assert.equal(projectFor(data, loose), null);
+  assert.equal(defaultBank(kee), "coding-agent::kee-clients"); // same name Claude Code's Hindsight plugin uses
+  const hcfg = join(base, "coding-agent.json");
+  writeFileSync(hcfg, JSON.stringify({ mapPathToBank: { [loose]: "my-scratch" } }));
+  process.env.HINDSIGHT_CONFIG = hcfg;
+  assert.equal(defaultBank(join(loose, "x")), "my-scratch"); // the plugin's own routing wins
+  delete process.env.HINDSIGHT_CONFIG;
+  assert.equal(bankFor(cfg, join(kee, "src")), "coding-agent::kee-clients");
+  assert.equal(bankFor(cfg, glasses), "kee-glasses"); // a project's own bank
+  assert.equal(bankFor(cfg, loose), "coding-agent::scratch"); // not a project: the folder's own bank
+  assert.equal(bankMcpUrl("http://localhost:8888/mcp/", "coding-agent::a b"), "http://localhost:8888/mcp/coding-agent%3A%3Aa%20b/");
+  assert.equal(bankPageUrl("http://localhost:9999", "coding-agent::x"), "http://localhost:9999/banks/coding-agent%3A%3Ax");
+  cfg.mcp = { hindsight: true };
+  cfg.memory.hindsight_mcp = "http://localhost:8888/mcp/";
+  assert.equal((buildExternalMcp(cfg, { cwd: glasses }).servers.hindsight as { url: string }).url, "http://localhost:8888/mcp/kee-glasses/");
+  assert.equal((buildExternalMcp(cfg).servers.hindsight as { url: string }).url, "http://localhost:8888/mcp/"); // no folder: all banks
+});

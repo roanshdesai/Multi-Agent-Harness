@@ -19,6 +19,7 @@ import { RemoteControl } from "../remote.js";
 import { runComputerUse, COMPUTER_TEST_PROMPT } from "../tools/computer.js";
 import { parseCaffeinate, type CaffeinateStatus } from "../caffeinate.js";
 import { claudeMemUrls, startClaudeMem, claudeMemDoctor, startHindsight } from "../memory.js";
+import { loadProjects, saveProjects, flattenProjects, projectFor, bankFor, defaultBank, bankPageUrl, folderExists, type Project, type ProjectsFile } from "../projects.js";
 import { listDocs, readDoc, summarizeDoc, cachedSummary } from "../docs.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -67,7 +68,8 @@ locateBundledBinaries();
 
 const root = resolveRoot();
 // Packaged: settings an older ~/.agent-harness/harness.config.yaml lacks come from the bundled one.
-const cfg: HarnessConfig = loadConfig(root, app.isPackaged ? join(process.resourcesPath, "seed", "harness.config.yaml") : undefined);
+// Also when run from source against another data folder (HARNESS_ROOT): the repo's config fills the gaps.
+const cfg: HarnessConfig = loadConfig(root, app.isPackaged ? join(process.resourcesPath, "seed", "harness.config.yaml") : join(appRoot, "harness.config.yaml"));
 const prefsFile = join(root, ".harness", "desktop.json");
 mkdirSync(dirname(prefsFile), { recursive: true });
 
@@ -180,8 +182,10 @@ async function firstUp(urls: string[]): Promise<{ url: string; up: boolean }> {
   for (const url of urls) {
     try {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 1200);
-      await fetch(url, { signal: ctrl.signal });
+      const t = setTimeout(() => ctrl.abort(), 3000);
+      // Any answer means it's running. Don't follow redirects: Hindsight's UI sends / to a
+      // dashboard that renders slowly while it's busy, which made it look stopped.
+      await fetch(url, { signal: ctrl.signal, redirect: "manual" });
       clearTimeout(t);
       return { url, up: true };
     } catch {
@@ -210,6 +214,7 @@ ipcMain.handle("init", async (e) => {
     availableModels,
     usageRefreshMinutes: cfg.limits.refresh_minutes ?? 0,
     workspace: process.cwd(),
+    home: homedir(),
     tabs,
     mcpSkipped: new Harness(cfg, askFor(0)).mcpSkipped,
     plugins: new Harness(cfg, askFor(0)).plugins.map((p) => p.path.split(/[\\/]/).pop()),
@@ -239,10 +244,15 @@ ipcMain.handle("agents", () => {
     custom: custom.has(name),
   }));
 });
-ipcMain.handle("memory-status", async () => ({
-  claudeMem: await firstUp(claudeMemUrls(cfg)),
-  hindsight: await firstUp(cfg.memory.hindsight),
-}));
+ipcMain.handle("memory-status", async () => {
+  const hindsight = await firstUp(cfg.memory.hindsight);
+  // The current project's own bank, so the Hindsight tab opens on it.
+  const bank = bankFor(cfg, process.cwd());
+  return {
+    claudeMem: await firstUp(claudeMemUrls(cfg)),
+    hindsight: { ...hindsight, bank, bankUrl: hindsight.up && hindsight.url ? bankPageUrl(hindsight.url, bank) : undefined },
+  };
+});
 // Start a memory service from the app, then wait (up to a minute) for its viewer to answer.
 ipcMain.handle("memory-start", async (_e, key: "claudeMem" | "hindsight") => {
   const r = key === "hindsight" ? await startHindsight(cfg) : await startClaudeMem(cfg);
@@ -256,15 +266,45 @@ ipcMain.handle("memory-start", async (_e, key: "claudeMem" | "hindsight") => {
   return { ...r, up: false, detail: `${r.detail} It hasn't answered on ${urls.join(" or ")} yet.` };
 });
 ipcMain.handle("memory-doctor", () => claudeMemDoctor(cfg));
+/** Make `dir` the folder agents work in; idle tabs move there (with that folder's memory bank). */
+function useWorkspace(dir: string) {
+  prefs = { ...prefs, workspace: dir };
+  savePrefs();
+  process.chdir(dir);
+  host.setWorkspace(dir);
+  return dir;
+}
 ipcMain.handle("pick-workspace", async (e) => {
   const win = windows.get(wid(e.sender));
   const r = await dialog.showOpenDialog(win!, { properties: ["openDirectory", "createDirectory"], defaultPath: process.cwd() });
   if (r.canceled || !r.filePaths[0]) return null;
-  prefs = { ...prefs, workspace: r.filePaths[0] };
-  savePrefs();
-  process.chdir(prefs.workspace);
-  host.setWorkspace(prefs.workspace);
-  return prefs.workspace;
+  return useWorkspace(r.filePaths[0]);
+});
+
+// Projects: groups of named folders, each with its own Hindsight bank.
+function projectsView(data: ProjectsFile = loadProjects(cfg)) {
+  const view = (p: Project): Project & { resolvedBank: string; exists: boolean } => ({
+    ...p,
+    resolvedBank: p.bank ?? defaultBank(p.path),
+    exists: folderExists(p.path),
+    ...(p.children && { children: p.children.map(view) }),
+  });
+  return {
+    groups: data.groups.map((g) => ({ name: g.name, projects: g.projects.map(view) })),
+    current: projectFor(data, process.cwd())?.path ?? null,
+    count: flattenProjects(data).length,
+  };
+}
+ipcMain.handle("projects", () => projectsView());
+ipcMain.handle("projects-save", (_e, data: ProjectsFile) => projectsView(saveProjects(cfg, data)));
+ipcMain.handle("project-open", (_e, dir: string) => {
+  if (!folderExists(dir)) throw new Error(`That folder doesn't exist any more: ${dir}`);
+  return useWorkspace(dir);
+});
+ipcMain.handle("pick-folder", async (e) => {
+  const win = windows.get(wid(e.sender));
+  const r = await dialog.showOpenDialog(win!, { properties: ["openDirectory"], defaultPath: process.cwd() });
+  return r.canceled ? null : (r.filePaths[0] ?? null);
 });
 ipcMain.handle("open-config", () => shell.openPath(join(cfg.root, "harness.config.yaml")));
 ipcMain.handle("open-design-library", () => shell.openPath(cfg.design_library));
