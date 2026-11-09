@@ -18,6 +18,8 @@ import type { TabInfo } from "./host.js";
 import type { AgentQuestion } from "./session.js";
 import { describeUsage, isExhausted, formatReset } from "./usage.js";
 import { saveCustomServer, removeCustomServer, setDisabled, parseServerSpec } from "./connections.js";
+import { listDocs, summarizeDoc } from "./docs.js";
+import type { ContextInfo } from "./session.js";
 
 const c = {
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
@@ -60,7 +62,8 @@ let busy = false;
 function render(e: ChatEvent) {
   switch (e.type) {
     case "user":
-      if (e.source && e.source !== "terminal") console.log(`${c.dim("app ›")} ${e.text}`);
+      if (e.change && e.source === "terminal") console.log(c.cyan("↻ correction sent; the agent adjusts at its next step"));
+      else if (e.source && e.source !== "terminal") console.log(`${c.dim(e.change ? "app (change) ›" : "app ›")} ${e.text}`);
       if (e.queued) console.log(c.dim("(queued; runs after the current turn. Use /btw for a side question)"));
       break;
     case "text":
@@ -123,6 +126,31 @@ function render(e: ChatEvent) {
       }
       break;
   }
+}
+
+// ── /context: the square grid Claude Code shows ────────────────────────────
+const CTX_COLOR: Record<string, (s: string) => string> = {
+  system_prompt: (s) => `\x1b[90m${s}\x1b[0m`,
+  system_tools: (s) => `\x1b[34m${s}\x1b[0m`,
+  mcp_tools: (s) => `\x1b[35m${s}\x1b[0m`,
+  mcp_instructions: (s) => `\x1b[35m${s}\x1b[0m`,
+  custom_agents: (s) => `\x1b[95m${s}\x1b[0m`,
+  memory_files: (s) => `\x1b[32m${s}\x1b[0m`,
+  skills: (s) => `\x1b[33m${s}\x1b[0m`,
+  messages: (s) => `\x1b[31m${s}\x1b[0m`,
+};
+const fmtK = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+function printContext(ctx: ContextInfo | null) {
+  if (!ctx) return console.log(c.dim("No context yet. Send a message first."));
+  const lines = ctx.grid.map((row) => row.map((sq) => (sq.fill ? (CTX_COLOR[sq.id] ?? c.dim)(sq.fill >= 0.7 ? "⛁" : "⛀") : c.dim("⛶"))).join(" "));
+  const legend = [
+    `${c.bold(`${ctx.percentage}%`)}  ${fmtK(ctx.total)}/${fmtK(ctx.max)} tokens · ${ctx.model}`,
+    "",
+    ...ctx.categories
+      .filter((x) => x.kind !== "deferred")
+      .map((x) => `${(CTX_COLOR[x.id] ?? c.dim)(x.kind === "free" ? "⛶" : "⛁")} ${x.name}: ${fmtK(x.tokens)} (${((x.tokens / ctx.max) * 100).toFixed(1)}%)`),
+  ];
+  for (let i = 0; i < Math.max(lines.length, legend.length); i++) console.log(`  ${lines[i] ?? " ".repeat(19)}   ${legend[i] ?? ""}`);
 }
 
 // ── questions the agent asks (AskUserQuestion) ─────────────────────────────
@@ -302,6 +330,13 @@ async function command(line: string): Promise<boolean> {
       case "/stop":
         await bridge.request("stop", { tabId });
         return true;
+      case "/change":
+        if (arg) await bridge.request("change", { tabId, text: arg });
+        else console.log("Usage: /change <what to do differently>");
+        return true;
+      case "/context":
+        printContext(await bridge.request<ContextInfo | null>("context", { tabId }));
+        return true;
       case "/btw":
         if (arg) printBtw(await bridge.request<string>("btw", { tabId, q: arg }));
         return true;
@@ -362,6 +397,36 @@ async function command(line: string): Promise<boolean> {
       if (busy) await engine.stop();
       else console.log(c.dim("Nothing running."));
       return true;
+    case "/change":
+      if (!arg) console.log("Usage: /change <what to do differently>. While a task runs, it adjusts at the next step without stopping.");
+      else engine.change(arg, "terminal");
+      return true;
+    case "/context":
+      printContext(await engine.context());
+      return true;
+    case "/docs": {
+      const list = listDocs(process.cwd());
+      if (!list.length) console.log(c.dim("No documents (.md, .txt, .pdf, .docx) in this folder."));
+      list.slice(0, 40).forEach((d, i) => console.log(`${String(i + 1).padStart(2)}. ${d.prd ? c.cyan("[PRD] ") : ""}${d.rel}  ${c.dim(new Date(d.mtime).toLocaleDateString())}`));
+      console.log(c.dim("\n/summarize <file or number> gives the main points."));
+      return true;
+    }
+    case "/summarize": {
+      const list = listDocs(process.cwd());
+      const file = /^\d+$/.test(arg) ? list[Number(arg) - 1]?.path : arg;
+      if (!file) {
+        console.log("Usage: /summarize <file or number from /docs>");
+        return true;
+      }
+      console.log(c.dim(`Summarizing ${file} with ${cfg.models.triage}…`));
+      const sum = await summarizeDoc(harness, file, [process.cwd(), cfg.root]);
+      console.log(`\n${c.bold(sum.tldr)}\n`);
+      const section = (title: string, items: string[]) => items.length && console.log(`${c.bold(title)}\n${items.map((x) => `  • ${x}`).join("\n")}\n`);
+      section("Main points", sum.points);
+      section("Requirements", sum.requirements);
+      section("Open questions", sum.open_questions);
+      return true;
+    }
     case "/fork": {
       const here = rest.includes("--here");
       const title = rest.filter((r) => r !== "--here").join(" ") || undefined;

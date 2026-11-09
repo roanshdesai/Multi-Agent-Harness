@@ -42,6 +42,18 @@ Each MCP server is only loaded once its keys are in `.env`. `/status` shows whic
 
 ## Desktop app
 
+Laid out like VS Code, with GitHub's look:
+- **Activity bar** on the left: Chats, Documents, Memory, MCP servers & apps, Team.
+- **Explorer** for the pane you pick.
+- **Editor-style tabs.**
+- **Status bar** at the bottom: folder, model, verifier, the context grid, Claude usage and ChatGPT.
+
+**/change:** while a task runs, type a correction and press ⌘Enter, click **Change now**, or use `/change <what to do differently>`. The agent adjusts at its next step without stopping, so you don't need Esc. Enter still queues a message for after the current turn. In a linked terminal, `/change` does the same.
+
+**Context grid:** the status bar shows how much of the context window the chat uses as a small grid. `/context` opens the full square grid Claude Code shows, broken down by category: system prompt, tools, skills, messages, free space.
+
+**Documents:** the Documents pane lists the project's documents (.md, .txt, .pdf, .docx…), with the files the agents opened or edited this session first and PRDs grouped together. Opening one shows it in a tab. **Summarize** (or **Summarize PRD**) gives the main points: a TL;DR, key points, requirements, and open questions. It runs on Sonnet and is cached until the file changes. `/docs` and `/summarize <file>` do the same in the terminal.
+
 **Tabs:** every tab is its own task with its own model, so several run at once (⌘T new tab, ⌘W close, ⌘1–9 switch). A tab that's working shows a moving border.
 
 **Claude or GPT per tab:** the model picker at the top lists Opus, Fable and Sonnet (Claude plan) and GPT-6 Astra and GPT-6.1 Sol (ChatGPT plan, through Codex). Switching a tab that already has a conversation to the other family opens a new tab, since they can't share history.
@@ -85,6 +97,9 @@ The terminal version (`npm start`) runs on the same engine and has the same comm
 |---|---|
 | `/fork [title]` | Copies this chat and opens the copy in a **new terminal window** (tmux, macOS Terminal or iTerm, Windows Terminal, or a Linux terminal). `--here` switches to the copy in place instead. |
 | `/btw <q>` | Asks a side question on a throwaway copy of the chat. Works while a turn is running and never changes the main chat. |
+| `/change <correction>` | Correct the running task without stopping it (⌘Enter in the app) |
+| `/context` | Context window grid by category |
+| `/docs` `/summarize <file>` | Documents and their main points |
 | `/new` `/chats` `/resume <id or #>` `/rename` `/compact` `/stop` | Manage chats |
 | `/advisor` `/code` `/research` `/test` `/image` `/video` | Send a task straight to one specialist |
 | `/subagents [describe \| suggest \| remove <name>]` | Make your own subagents |
@@ -128,6 +143,7 @@ src/subagents.ts        /subagents storage and the advisor's design prompt
 src/tools/gpt.ts        ask_gpt and image tools for the Claude team
 src/connections.ts      MCP servers & apps: status, add, turn off
 src/usage.ts            Claude plan usage windows and the GPT switch rule
+src/docs.ts             Documents pane: listing, PRD detection, summaries
 src/cli.ts              terminal app
 src/desktop/main.ts     desktop app (Electron main process)
 desktop/renderer/       desktop window UI

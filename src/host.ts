@@ -44,6 +44,8 @@ export class Host {
   commands?: Harness["commands"];
   /** Latest Claude usage seen by any tab. */
   usage: UsageSnapshot | null;
+  /** Files the agents read or edited this session (for the Documents pane). */
+  touched = new Map<string, "read" | "edited">();
 
   constructor(
     readonly cfg: HarnessConfig,
@@ -98,6 +100,10 @@ export class Host {
       const t = this.tabs.get(tab.id);
       if (t && event.type === "user" && t.title === "New chat") t.title = event.text.replace(/\s+/g, " ").slice(0, 48);
       if (event.type === "usage") this.usage = event.usage;
+      if (event.type === "tool" && /^(Read|Write|Edit|MultiEdit|NotebookEdit)$/.test(event.name) && /[\\/]/.test(event.summary)) {
+        const edited = event.name !== "Read";
+        if (edited || !this.touched.has(event.summary)) this.touched.set(event.summary, edited ? "edited" : "read");
+      }
       this.broadcast({ type: "event", tabId: tab.id, event });
       if (event.type === "limit") void this.fallbackToGpt(tab.id, event.prompt);
       if (event.type === "busy" || event.type === "session") this.publishTabs();
@@ -156,6 +162,14 @@ export class Host {
     this.note(tabId, `Claude's usage limit is reached${resets ? ` (resets ${resets})` : ""}. Continuing this task on ${this.cfg.models.gpt[0]} with your ChatGPT plan.`);
     this.publishTabs();
     gpt.send(prompt, "auto");
+  }
+
+  change(tabId: string, text: string, source = "app") {
+    this.get(tabId).engine.change(text, source);
+  }
+
+  context(tabId: string) {
+    return this.get(tabId).engine.context();
   }
 
   answer(tabId: string, id: string, answers: Record<string, string>) {

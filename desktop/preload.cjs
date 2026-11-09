@@ -29,6 +29,12 @@ contextBridge.exposeInMainWorld("harness", {
   mcpAdd: (name, spec) => invoke("mcp-add", name, spec),
   mcpRemove: (name) => invoke("mcp-remove", name),
   answer: (tabId, id, answers) => invoke("answer", tabId, id, answers),
+  change: (tabId, text) => invoke("change", tabId, text),
+  context: (tabId) => invoke("context", tabId),
+  docs: () => invoke("docs"),
+  readDoc: (path) => invoke("doc-read", path),
+  summarizeDoc: (path, force) => invoke("doc-summarize", path, force),
+  openDocExternal: (path) => invoke("doc-open-external", path),
   // tabs
   newTab: (opts) => invoke("tab-new", opts),
   closeTab: (tabId) => invoke("tab-close", tabId),

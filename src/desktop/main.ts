@@ -13,6 +13,7 @@ import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "../tools/d
 import { codexStatus } from "../subscription.js";
 import { upsertSubagents, removeSubagent, type CustomSubagent } from "../subagents.js";
 import { saveCustomServer, removeCustomServer, setDisabled, parseServerSpec } from "../connections.js";
+import { listDocs, readDoc, summarizeDoc, cachedSummary } from "../docs.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(here, "..", ".."); // repo root (dev) or app.asar (packaged)
@@ -251,6 +252,15 @@ ipcMain.handle("mcp-toggle", (_e, name: string, enabled: boolean) => setDisabled
 ipcMain.handle("mcp-add", (_e, name: string, spec: string) => saveCustomServer(cfg, name, parseServerSpec(spec)));
 ipcMain.handle("mcp-remove", (_e, name: string) => removeCustomServer(cfg, name));
 ipcMain.handle("answer", (_e, tabId: string, id: string, answers: Record<string, string>) => host.answer(tabId, id, answers));
+ipcMain.handle("change", (_e, tabId: string, text: string) => host.change(tabId, text, "app"));
+ipcMain.handle("context", (_e, tabId: string) => host.context(tabId));
+
+// Documents
+const docRoots = () => [process.cwd(), cfg.root];
+ipcMain.handle("docs", () => listDocs(process.cwd(), host.touched));
+ipcMain.handle("doc-read", (_e, path: string) => ({ ...readDoc(path, docRoots()), summary: cachedSummary(cfg, path) }));
+ipcMain.handle("doc-summarize", (_e, path: string, force?: boolean) => summarizeDoc(new Harness(cfg, askFor(0)), path, docRoots(), force));
+ipcMain.handle("doc-open-external", (_e, path: string) => shell.openPath(readDoc(path, docRoots()).path));
 
 // /subagents
 ipcMain.handle("subagents-design", (e, request: string) => host.harnessFor(String(host.list(wid(e.sender))[0]?.id)).designSubagents(request));

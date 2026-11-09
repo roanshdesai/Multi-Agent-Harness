@@ -19,7 +19,9 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
   { name: "/resume", args: "<id | #>", description: "Reopen a chat", group: "Chat" },
   { name: "/rename", args: "<title>", description: "Rename this chat", group: "Chat" },
   { name: "/compact", description: "Summarize the chat so far to free up context", group: "Chat" },
+  { name: "/change", args: "<correction>", description: "Correct the agent mid-task without stopping it (Esc not needed)", group: "Chat" },
   { name: "/stop", description: "Stop the running turn (and its verifier)", group: "Chat" },
+  { name: "/context", description: "Tokens in this chat's context window, as a grid", group: "Chat" },
   { name: "/tabs", description: "List open tabs (terminal linked to the app; in the app, use the tab bar)", group: "Chat" },
   { name: "/tab", args: "<n>", description: "Switch tab (terminal linked to the app; in the app, ⌘1–9)", group: "Chat" },
   { name: "/detach", description: "Stop sharing tabs with the app (terminal only)", group: "Chat" },
@@ -37,6 +39,8 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
   { name: "/recall", args: "<question>", description: "Search long-term memory (Hindsight + claude-mem)", group: "Memory" },
 
   { name: "/agents", description: "Show the team and their models", group: "Harness" },
+  { name: "/docs", args: "[file]", description: "Documents in the project; open one", group: "Harness" },
+  { name: "/summarize", args: "<file>", description: "Main points of a document (PRDs get requirements and open questions)", group: "Harness" },
   { name: "/usage", description: "Claude plan usage (5-hour and weekly) and ChatGPT status", group: "Harness" },
   { name: "/connections", description: "MCP servers and apps: status, reconnect, turn off, add", group: "Harness", aliases: ["/mcp", "/apps"] },
   { name: "/status", description: "Plans, models, integrations, plugins", group: "Harness" },

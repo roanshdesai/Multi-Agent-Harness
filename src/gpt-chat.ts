@@ -123,6 +123,16 @@ export class GptChat implements Engine {
     throw new Error("Forking isn't available for GPT chats yet.");
   }
 
+  /** Codex can't take input mid-turn, so a correction runs right after the current turn. */
+  change(text: string, source?: string) {
+    if (this.busy) this.emit({ type: "note", text: "GPT can't take corrections mid-turn; this runs as soon as the current turn ends." });
+    this.send(text, source);
+  }
+
+  async context() {
+    return null;
+  }
+
   answer(): boolean {
     return false; // Codex runs non-interactively; it doesn't ask questions mid-turn
   }

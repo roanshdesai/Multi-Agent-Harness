@@ -9,14 +9,15 @@ import {
   type Query,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Harness, type TurnResult, type AgentQuestion } from "./session.js";
+import { Harness, type TurnResult, type AgentQuestion, type ContextInfo } from "./session.js";
 import type { UsageSnapshot } from "./usage.js";
 
 /** Everything a UI (terminal or desktop) needs to draw a chat. */
 export type ChatEvent =
   | { type: "session"; id: string }
   | { type: "busy"; busy: boolean }
-  | { type: "user"; text: string; queued?: boolean; source?: string }
+  | { type: "user"; text: string; queued?: boolean; source?: string; change?: boolean }
+  | { type: "context"; context: ContextInfo }
   | { type: "text-delta"; text: string }
   | { type: "text"; text: string }
   | { type: "agent"; id: string; agent: string; description: string }
@@ -34,6 +35,18 @@ export type ChatEvent =
 export interface HistoryItem {
   role: "user" | "assistant" | "agent" | "tool";
   text: string;
+  /** A /change correction sent while the agent worked. */
+  change?: boolean;
+}
+
+/** Messages Claude Code adds to the transcript itself (not typed by you). */
+const INTERNAL = /^\s*<(task-notification|system-reminder|local-command-[a-z]+|command-name|command-message|command-args|bash-[a-z]+)>/;
+const CHANGE_PREFIX = "[Correction from the user while you work: keep going, just adjust] ";
+
+function userItem(text: string): HistoryItem | null {
+  if (!text.trim() || INTERNAL.test(text)) return null;
+  if (text.startsWith(CHANGE_PREFIX)) return { role: "user", text: text.slice(CHANGE_PREFIX.length), change: true };
+  return { role: "user", text };
 }
 
 export interface ChatSummary {
@@ -60,7 +73,14 @@ export interface Engine {
   rename(title: string): Promise<void>;
   /** Answer a question the agent asked (from the app or a linked terminal). */
   answer(id: string, answers: Record<string, string>): boolean;
+  /** /change: correct the running task without stopping it. Sent normally when idle. */
+  change(text: string, source?: string): void;
+  /** Tokens in the context window, by category. */
+  context(): Promise<ContextInfo | null>;
 }
+
+/** How a /change correction is phrased to the model. */
+export const changeNote = (text: string) => `${CHANGE_PREFIX}${text}`;
 
 export function summarizeInput(input: any): string {
   const v = input?.command ?? input?.file_path ?? input?.pattern ?? input?.url ?? input?.query ?? input?.description ?? input?.prompt ?? "";
@@ -102,6 +122,8 @@ export class ChatEngine implements Engine {
   private current: Query | null = null;
   private stopped = false;
   private questions = new Map<string, (a: Record<string, string>) => void>();
+  private steer: ((text: string) => boolean) | null = null;
+  lastContext: ContextInfo | null = null;
   private qseq = 0;
   private queue: string[] = [];
   private stateFile: string;
@@ -120,6 +142,20 @@ export class ChatEngine implements Engine {
         this.emit({ type: "question", id, questions });
       });
     harness.onUsage = (usage) => this.emit({ type: "usage", usage });
+  }
+
+  change(text: string, source?: string) {
+    if (this.busy && this.steer?.(changeNote(text))) {
+      this.emit({ type: "user", text, source, change: true });
+      return;
+    }
+    this.send(text, source);
+  }
+
+  async context(): Promise<ContextInfo | null> {
+    if (this.lastContext || !this.sessionId) return this.lastContext;
+    this.lastContext = await this.harness.contextFor(this.sessionId);
+    return this.lastContext;
   }
 
   answer(id: string, answers: Record<string, string>): boolean {
@@ -165,6 +201,7 @@ export class ChatEngine implements Engine {
 
   resume(id: string) {
     this.sessionId = id;
+    this.lastContext = null;
     this.emit({ type: "session", id });
   }
 
@@ -195,11 +232,9 @@ export class ChatEngine implements Engine {
       if (m.parent_tool_use_id) continue;
       const content = (m.message as any)?.content;
       if (m.type === "user") {
-        if (typeof content === "string") out.push({ role: "user", text: content });
-        else if (Array.isArray(content)) {
-          const t = content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
-          if (t.trim()) out.push({ role: "user", text: t });
-        }
+        const t = typeof content === "string" ? content : Array.isArray(content) ? content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n") : "";
+        const item = userItem(t);
+        if (item) out.push(item);
       } else if (m.type === "assistant" && Array.isArray(content)) {
         for (const b of content) {
           if (b.type === "text" && b.text.trim()) out.push({ role: "assistant", text: b.text });
@@ -265,7 +300,15 @@ export class ChatEngine implements Engine {
     this.emit({ type: "busy", busy: true });
     const h = this.harness;
     const extra: Partial<Options> = this.opts.stream ? { includePartialMessages: true } : {};
-    const hooks = { onMessage: this.onMessage, onQuery: (q: Query) => (this.current = q) };
+    const hooks = {
+      onMessage: this.onMessage,
+      onQuery: (q: Query) => (this.current = q),
+      onSteer: (fn: (text: string) => boolean) => (this.steer = fn),
+      onContext: (c: ContextInfo) => {
+        this.lastContext = c;
+        this.emit({ type: "context", context: c });
+      },
+    };
     try {
       let r: TurnResult = await h.run(prompt, { ...extra, ...(this.sessionId ? { resume: this.sessionId } : {}) }, hooks);
       this.sessionId = r.sessionId || this.sessionId;
@@ -274,6 +317,7 @@ export class ChatEngine implements Engine {
       if (h.verifyEnabled && !r.isError && (r.agentsUsed.length > 0 || r.numTurns > 2) && this.sessionId && !prompt.startsWith("/")) {
         for (let round = 1; round <= h.cfg.verify.max_rounds; round++) {
           this.emit({ type: "verify", status: "running", round });
+          this.steer = null; // corrections during verification wait for the next turn
           const v = await h.verify(this.sessionId, { onQuery: hooks.onQuery });
           if (this.stopped) break;
           this.emit({ type: "verify", status: v.pass ? "pass" : "fail", round, feedback: v.feedback });
@@ -303,6 +347,7 @@ export class ChatEngine implements Engine {
     } finally {
       if (this.sessionId) writeFileSync(this.stateFile, this.sessionId);
       this.current = null;
+      this.steer = null;
       this.busy = false;
       this.emit({ type: "busy", busy: false });
       const next = this.queue.shift();

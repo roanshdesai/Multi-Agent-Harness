@@ -10,107 +10,61 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <div class="titlebar"><span>Agent Harness</span></div>
     <div class="app" id="app">
-      <!-- ── sidebar ── -->
-      <aside class="sidebar">
-        <div class="drag-region"></div>
-        <div class="brand">
-          <div class="logo" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" /><circle cx="4.5" cy="6" r="1.8" /><circle cx="19.5" cy="6" r="1.8" /><circle cx="12" cy="20.5" r="1.8" /><path d="M5.9 7.1L9.5 10M18.1 7.1L14.5 10M12 15.2v3.5" /></svg>
-          </div>
-          <span>Agent Harness</span>
-        </div>
-
-        <button class="new-chat" id="newTabBtn" title="New tab (⌘T)">
-          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
-          <span>New task</span>
-          <kbd>⌘T</kbd>
+      <!-- activity bar (VS Code) -->
+      <nav class="activity" aria-label="Views">
+        <button class="act active" data-pane="chats" title="Chats">
+          <svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z" /></svg>
         </button>
+        <button class="act" data-pane="docs" title="Documents">
+          <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6" /></svg>
+        </button>
+        <button class="act" data-pane="memory" title="Memory (claude-mem, Hindsight)">
+          <svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></svg>
+        </button>
+        <button class="act" data-pane="connections" title="MCP servers & apps">
+          <svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5" /></svg>
+          <span class="act-badge" id="connBadge" hidden></span>
+        </button>
+        <button class="act" data-pane="team" title="Team & subagents">
+          <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.3" /><path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6M15 14.6c2.6-.3 4.8 1 5.5 3.9" /></svg>
+        </button>
+        <div class="act-spacer"></div>
+        <button class="act" id="statusAct" title="Status & settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /></svg>
+        </button>
+      </nav>
 
-        <div class="search-wrap">
-          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4-4" /></svg>
-          <input class="chat-search" id="chatSearch" placeholder="Search chats" />
-          <kbd>⌘K</kbd>
+      <!-- sidebar -->
+      <aside class="sidebar">
+        <div class="pane-head">
+          <span id="paneTitle">Chats</span>
+          <div class="pane-actions" id="paneActions"></div>
         </div>
-
-        <div class="side-scroll">
-          <div class="side-section">
-            <div class="side-label">Memory</div>
-            <button class="side-item mem" id="memClaudeMem" data-mem="claudeMem">
-              <span class="mem-icon cm">
-                <svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-6 6c0 2.2 1.2 3.6 2.4 4.8.8.8 1.1 1.5 1.1 2.7V18h5v-1.5c0-1.2.3-1.9 1.1-2.7C16.8 12.6 18 11.2 18 9a6 6 0 0 0-6-6zM10 21h4" /></svg>
-              </span>
-              <span class="side-text">claude-mem<small>Session memory</small></span>
-              <span class="dot" data-status></span>
-            </button>
-            <button class="side-item mem" id="memHindsight" data-mem="hindsight">
-              <span class="mem-icon hs">
-                <svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
-              </span>
-              <span class="side-text">Hindsight<small>Long-term memory</small></span>
-              <span class="dot" data-status></span>
-            </button>
-          </div>
-
-          <div class="side-section">
-            <div class="side-label">Connections</div>
-            <button class="side-item" id="connBtn">
-              <span class="mem-icon conn">
-                <svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5" /></svg>
-              </span>
-              <span class="side-text">MCP servers & apps<small id="connCount">Checking…</small></span>
-              <span class="dot" id="connDot"></span>
-            </button>
-          </div>
-
-          <div class="side-section">
-            <div class="side-label">Team</div>
-            <button class="side-item" id="teamBtn">
-              <span class="mem-icon team">
-                <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.3" /><path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6M15 14.6c2.6-.3 4.8 1 5.5 3.9" /></svg>
-              </span>
-              <span class="side-text">Subagents<small id="teamCount">Built-in team</small></span>
-            </button>
-          </div>
-
-          <div class="side-section">
-            <div class="side-label">Chats</div>
-            <nav class="chat-list" id="chatList" aria-label="Chats"></nav>
-          </div>
-        </div>
-
-        <div class="sidebar-foot">
-          <button class="workspace" id="workspaceBtn" title="Folder the agents work in">
-            <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
-            <span id="workspaceName">…</span>
-          </button>
-          <button class="usage" id="usageBtn" title="Claude plan usage (/usage)"></button>
-          <div class="plans" id="plans"></div>
-        </div>
+        <div class="pane-search"><input id="paneSearch" placeholder="Search" /></div>
+        <div class="pane-body" id="paneBody"></div>
       </aside>
 
-      <!-- ── main ── -->
+      <!-- editor area -->
       <main class="main">
-        <div class="tabbar" id="tabbar">
+        <div class="tabbar">
           <div class="tabs" id="tabs" role="tablist"></div>
-          <button class="tab-add" id="tabAdd" title="New tab (⌘T)" aria-label="New tab">
+          <button class="tab-add" id="tabAdd" title="New task (⌘T)" aria-label="New task">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
           </button>
         </div>
 
-        <header class="topbar" id="topbar">
-          <h1 id="chatTitle" title="Double-click to rename">New chat</h1>
+        <header class="toolbar" id="toolbar">
+          <div class="crumbs"><span class="crumb-folder" id="crumbFolder"></span><span class="sep">/</span><h1 id="chatTitle" title="Double-click to rename">New chat</h1></div>
           <div class="top-actions">
-            <label class="model-pick" title="Model for this tab">
-              <span class="model-dot" id="modelDot"></span>
+            <label class="select" title="Model for this tab">
               <select id="modelSelect"></select>
               <svg viewBox="0 0 24 24" class="chev"><path d="M7 10l5 5 5-5" /></svg>
             </label>
-            <button class="pill toggle" id="verifyBtn" title="Fable verifier checks delegated work">Verifier</button>
-            <button class="ghost" id="btwBtn" title="Side question (/btw)">btw</button>
-            <button class="ghost" id="forkBtn" title="Fork into a new window (/fork)">
-              <svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7M12 12v5" /></svg>Fork
-            </button>
+            <button class="btn toggle" id="verifyBtn" title="Fable verifier checks delegated work"><span class="check"></span>Verifier</button>
+            <button class="btn" id="btwBtn" title="Side question (/btw)">btw</button>
+            <button class="btn" id="forkBtn" title="Fork into a new window (/fork)">Fork</button>
           </div>
         </header>
 
@@ -119,30 +73,41 @@
         <footer class="composer-wrap" id="composerWrap">
           <div class="slash-menu" id="slashMenu" role="listbox" hidden></div>
           <div class="composer" id="composer">
-            <textarea id="input" rows="1" placeholder="Message the team. Type / for commands" autofocus></textarea>
-            <button class="send" id="sendBtn" title="Send (Enter)" aria-label="Send">
-              <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-            </button>
-            <button class="stop" id="stopBtn" title="Stop" aria-label="Stop" hidden>
-              <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
-            </button>
+            <textarea id="input" rows="1" placeholder="Ask the team, or type / for commands" autofocus></textarea>
+            <div class="composer-bar">
+              <span class="hint" id="hint"></span>
+              <div class="composer-actions">
+                <button class="btn" id="changeBtn" hidden title="Correct the agent now without stopping (⌘Enter)">Change now</button>
+                <button class="btn danger" id="stopBtn" hidden title="Stop">Stop</button>
+                <button class="btn primary" id="sendBtn" title="Send (Enter)">Send</button>
+              </div>
+            </div>
           </div>
-          <div class="hint" id="hint"></div>
         </footer>
       </main>
 
       <aside class="btw-panel" id="btwPanel" hidden>
-        <div class="btw-head">
-          <strong>By the way</strong>
-          <span>Side questions don't touch the chat</span>
-          <button class="icon" id="btwClose" aria-label="Close">×</button>
-        </div>
+        <div class="pane-head"><span>By the way</span><button class="icon" id="btwClose" aria-label="Close">×</button></div>
+        <p class="btw-sub">Side questions don't touch the chat.</p>
         <div class="btw-list" id="btwList"></div>
-        <form class="btw-form" id="btwForm">
-          <input id="btwInput" placeholder="Ask a quick side question…" />
-        </form>
+        <form class="btw-form" id="btwForm"><input id="btwInput" placeholder="Ask a side question…" /></form>
       </aside>
     </div>
+
+    <!-- status bar (VS Code) -->
+    <footer class="statusbar" id="statusbar">
+      <div class="sb-left">
+        <button class="sb" id="sbFolder" title="Project folder"></button>
+        <button class="sb" id="sbModel" title="Model for this tab"></button>
+        <button class="sb" id="sbVerify" title="Verifier"></button>
+        <span class="sb" id="sbTasks"></span>
+      </div>
+      <div class="sb-right">
+        <button class="sb" id="sbContext" title="Context window (/context)"></button>
+        <button class="sb" id="sbUsage" title="Claude plan usage (/usage)"></button>
+        <button class="sb" id="sbGpt" title="ChatGPT plan"></button>
+      </div>
+    </footer>
 
     <div class="modal" id="modal" hidden>
       <div class="modal-card">
@@ -160,7 +125,7 @@
           <li>Run <code>/login</code> and choose your Claude Pro or Max account</li>
           <li>Come back and press Retry</li>
         </ol>
-        <button class="primary" id="retryAuth">Retry</button>
+        <button class="btn primary" id="retryAuth">Retry</button>
       </div>
     </div>
 

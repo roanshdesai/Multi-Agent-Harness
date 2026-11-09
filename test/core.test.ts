@@ -116,6 +116,7 @@ test("commands: harness commands win, plugin commands added, only useful built-i
     { name: "help", description: "Claude Code help", argumentHint: "", builtin: true },
     { name: "login", description: "Sign in", argumentHint: "", builtin: true },
     { name: "context", description: "Show context usage", argumentHint: "", builtin: true },
+    { name: "init", description: "Create CLAUDE.md", argumentHint: "", builtin: true },
     { name: "btw", description: "a plugin trying to take /btw", argumentHint: "" },
   ]);
   const names = merged.map((c) => c.name);
@@ -123,7 +124,9 @@ test("commands: harness commands win, plugin commands added, only useful built-i
   assert.equal(merged.find((c) => c.name === "/btw")!.group, "Chat");
   assert.ok(names.includes("/superpowers:brainstorm"));
   assert.equal(merged.find((c) => c.name === "/review")!.group, "Skills & plugins");
-  assert.equal(merged.find((c) => c.name === "/context")!.group, "Claude Code");
+  assert.equal(merged.find((c) => c.name === "/context")!.group, "Chat"); // the harness's own /context wins
+  assert.equal(merged.filter((c) => c.name === "/context").length, 1);
+  assert.equal(merged.find((c) => c.name === "/init")!.group, "Claude Code");
   assert.ok(!names.includes("/login"));
   assert.equal(names.slice(0, HARNESS_COMMANDS.length).join(), HARNESS_COMMANDS.map((c) => c.name).join());
   assert.equal(canonical("/clear"), "/new");
@@ -288,4 +291,45 @@ test("out of Claude usage: the tab carries the conversation over to GPT and re-s
   assert.match(text, /continuing a task that was running on Claude/); // context was carried over
   assert.match(text, /finish the report/);
   delete process.env.HARNESS_CODEX_BIN;
+});
+
+test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
+  const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
+  const dir = mkdtempSync(join(tmpdir(), "docs-"));
+  mkdirSync(join(dir, "specs"));
+  mkdirSync(join(dir, "node_modules"));
+  writeFileSync(join(dir, "README.md"), "# Hello");
+  writeFileSync(join(dir, "specs", "checkout-prd.md"), "# Checkout");
+  writeFileSync(join(dir, "notes.txt"), "Product Requirements Document\nGoals: ...");
+  writeFileSync(join(dir, "node_modules", "skip.md"), "x");
+  writeFileSync(join(dir, "code.ts"), "x");
+  const list = listDocs(dir, new Map([[join(dir, "README.md"), "edited"]]));
+  assert.deepEqual(list.map((d) => d.rel).sort(), ["README.md", "notes.txt", join("specs", "checkout-prd.md")].sort());
+  assert.equal(list[0].rel, "README.md"); // touched by an agent comes first
+  assert.ok(isPrd(join(dir, "specs", "checkout-prd.md")));
+  assert.ok(isPrd(join(dir, "notes.txt")));
+  assert.ok(!isPrd(join(dir, "README.md")));
+  assert.equal(readDoc(join(dir, "README.md"), [dir]).text, "# Hello");
+  assert.throws(() => safePath("/etc/passwd", [dir]), /outside the project/);
+  assert.throws(() => safePath(join(dir, "..", "escape.md"), [dir]), /outside the project/);
+});
+
+test("/change: steering text is sent into a running turn, otherwise sent normally", async () => {
+  const { ChatEngine, changeNote } = await import("../src/engine.js");
+  const events: any[] = [];
+  const fakeHarness: any = { cfg: { root: mkdtempSync(join(tmpdir(), "r-")) }, mainModel: "claude-opus-5-5" };
+  const engine = new ChatEngine(fakeHarness, (e) => events.push(e));
+  const steered: string[] = [];
+  (engine as any).busy = true;
+  (engine as any).steer = (t: string) => (steered.push(t), true);
+  engine.change("use DELTA instead", "terminal");
+  assert.deepEqual(steered, [changeNote("use DELTA instead")]);
+  assert.deepEqual(events.pop(), { type: "user", text: "use DELTA instead", source: "terminal", change: true });
+  // idle: becomes a normal message
+  (engine as any).busy = false;
+  (engine as any).steer = null;
+  let sent = "";
+  (engine as any).runTurn = async (t: string) => (sent = t);
+  engine.change("do it this way");
+  assert.equal(sent, "do it this way");
 });

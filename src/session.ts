@@ -7,6 +7,8 @@ import {
   type Query,
   type SDKMessage,
   type SdkPluginConfig,
+  type SDKUserMessage,
+  type SDKControlGetContextUsageResponse,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { HarnessConfig } from "./config.js";
 import { buildAgents } from "./agents.js";
@@ -20,6 +22,63 @@ import { assertClaudeSubscription, subscriptionEnv } from "./subscription.js";
 import { HARNESS_COMMANDS, mergeCommands, type CommandInfo } from "./commands.js";
 import { loadCustomServers, loadDisabled, readConnections, type ConnectionInfo } from "./connections.js";
 import { toSnapshot, saveUsage, loadUsage, type UsageSnapshot } from "./usage.js";
+
+/** A pushable stream of user messages, so a running task can take corrections (/change). */
+export function inputChannel() {
+  const buf: SDKUserMessage[] = [];
+  let wake: (() => void) | null = null;
+  let done = false;
+  const it = (async function* () {
+    while (true) {
+      if (buf.length) {
+        yield buf.shift()!;
+        continue;
+      }
+      if (done) return;
+      await new Promise<void>((r) => (wake = r));
+      wake = null;
+    }
+  })();
+  return {
+    it,
+    push(text: string, priority?: "next" | "now") {
+      if (done) return false;
+      buf.push({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, ...(priority && { priority }) } as SDKUserMessage);
+      wake?.();
+      return true;
+    },
+    get pending() {
+      return buf.length;
+    },
+    close() {
+      done = true;
+      wake?.();
+    },
+  };
+}
+
+/** Tokens in the context window by category, like Claude Code's /context grid. */
+export interface ContextInfo {
+  model: string;
+  total: number;
+  max: number;
+  percentage: number;
+  categories: { id: string; name: string; tokens: number; kind: "used" | "free" | "buffer" | "deferred" }[];
+  /** Claude Code's /context grid: rows of squares, each tagged with its category and how full it is. */
+  grid: { id: string; fill: number }[][];
+}
+
+export function toContextInfo(u: SDKControlGetContextUsageResponse): ContextInfo {
+  const idByName = new Map(u.categories.map((c) => [c.name, c.id ?? c.name]));
+  return {
+    model: u.model,
+    total: u.totalTokens,
+    max: u.rawMaxTokens || u.maxTokens,
+    percentage: u.percentage,
+    categories: u.categories.filter((c) => c.tokens > 0).map((c) => ({ id: c.id ?? c.name, name: c.name, tokens: c.tokens, kind: c.kind })),
+    grid: (u.gridRows ?? []).map((row) => row.map((sq) => ({ id: idByName.get(sq.categoryName) ?? "free_space", fill: sq.isFilled ? sq.squareFullness || 1 : 0 }))),
+  };
+}
 
 /** One question the agent asks you (AskUserQuestion). */
 export interface AgentQuestion {
@@ -100,6 +159,10 @@ export interface TurnResult {
 export interface TurnHooks {
   onMessage?: (m: SDKMessage) => void;
   onQuery?: (q: Query) => void;
+  /** Receives a function that sends a correction into the running task. */
+  onSteer?: (steer: (text: string) => boolean) => void;
+  /** Called with the context breakdown when the turn ends. */
+  onContext?: (c: ContextInfo) => void;
 }
 
 export class Harness {
@@ -217,12 +280,17 @@ export class Harness {
 
   /** Run one prompt to completion, streaming messages to the hooks. */
   async run(prompt: string, opts: Partial<Options>, hooks: TurnHooks = {}): Promise<TurnResult> {
-    const q = query({ prompt, options: this.options(opts) });
+    // Streaming input keeps the task open to corrections while it runs.
+    const input = inputChannel();
+    input.push(prompt);
+    const q = query({ prompt: input.it, options: this.options(opts) });
+    hooks.onSteer?.((text) => input.push(text, "next"));
     for (const name of loadDisabled(this.cfg)) await q.toggleMcpServer(name, false).catch(() => {});
     if (this.cfg.auth.subscription_only && !this.plan) {
       try {
         this.plan = assertClaudeSubscription(await q.accountInfo());
       } catch (err) {
+        input.close();
         q.close();
         throw err;
       }
@@ -252,10 +320,35 @@ export class Harness {
         res.text = m.subtype === "success" ? m.result : `(${m.subtype})`;
         if (m.is_error && this.usage?.status === "rejected") res.rateLimited = true;
         if (m.subtype === "success") res.structured = m.structured_output;
+        hooks.onMessage?.(m);
+        // A correction that arrived just as the turn ended starts one more turn; otherwise we're done.
+        if (input.pending === 0) {
+          if (hooks.onContext) {
+            const ctx = await q.getContextUsage({ detail: "summary" }).catch(() => null);
+            if (ctx) hooks.onContext(toContextInfo(ctx));
+          }
+          input.close();
+        }
+        continue;
       }
       hooks.onMessage?.(m);
     }
+    input.close();
     return res;
+  }
+
+  /** Context breakdown for a saved chat, without sending anything. */
+  async contextFor(sessionId: string): Promise<ContextInfo | null> {
+    const input = inputChannel();
+    const q = query({ prompt: input.it, options: this.options({ resume: sessionId, persistSession: false }) });
+    try {
+      return toContextInfo(await q.getContextUsage({ detail: "summary" }));
+    } catch {
+      return null;
+    } finally {
+      input.close();
+      q.close();
+    }
   }
 
   /** Every MCP server and app the agents can reach, with live status. */

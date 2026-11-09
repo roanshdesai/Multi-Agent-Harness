@@ -6,38 +6,61 @@ const $ = (id) => document.getElementById(id);
 const viewsEl = $("views");
 const input = $("input");
 
-const AGENT_COLORS = ["advisor", "coder", "researcher", "summarizer", "gui-tester", "image", "video", "designer", "verifier"];
-const SUGGESTIONS = [
-  ["Research", "var(--a-researcher)", "Compare the React animation libraries in my design library", "/research "],
-  ["Code", "var(--a-coder)", "Build a landing page hero with Magic UI components", "/code "],
-  ["Image", "var(--a-image)", "Make an app icon: a terracotta node graph, soft gradient", "Use the image agent: "],
-  ["Subagents", "var(--accent)", "Suggest subagents for this project", "/subagents"],
-];
-
 let info = null;
 let COMMANDS = [];
 let allChats = [];
+let docs = [];
+let agents = [];
+let connState = [];
+let memStatus = null;
+let usageState = null;
 let slashIndex = 0;
-/** tabId → tab state. Chat tabs mirror the host; memory tabs live only here. */
+let pane = "chats";
+const collapsed = new Set();
+
+/** tabId → tab state. Chat tabs mirror the host; document and memory tabs are local. */
 const tabs = new Map();
 let order = [];
 let active = null;
-let memSeq = 0;
+let localSeq = 0;
 
-// ── helpers ────────────────────────────────────────────────────────────────
+// ── small helpers ──────────────────────────────────────────────────────────
 function el(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
   if (text !== undefined) n.textContent = text;
   return n;
 }
-const svg = (d, extra = "") => `<svg viewBox="0 0 24 24" ${extra}><path d="${d}"/></svg>`;
-function md(text) {
-  return DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: false }));
-}
-function agentColor(name) {
-  return AGENT_COLORS.includes(name) ? `var(--a-${name})` : "var(--a-other)";
-}
+const ICONS = {
+  chat: "M4 5h16v11H8l-4 4z",
+  doc: "M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6",
+  db: "M5 6c0 1.7 3.1 3 7 3s7-1.3 7-3-3.1-3-7-3-7 1.3-7 3zM5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6",
+  plus: "M12 5v14M5 12h14",
+  x: "M6 6l12 12M18 6L6 18",
+  check: "M5 12.5l4.5 4.5L19 7.5",
+  chevD: "M6 9l6 6 6-6",
+  chevR: "M9 6l6 6-6 6",
+  folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
+  refresh: "M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6",
+  ext: "M14 4h6v6M20 4l-9 9M18 14v5H5V6h5",
+  terminal: "M4 17l6-6-6-6M12 19h8",
+  spark: "M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6",
+  q: "M12 18h.01M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3",
+  plug: "M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5",
+  people: "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3.5 19c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6",
+  list: "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
+};
+const icon = (name, cls = "") => {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 24 24");
+  if (cls) s.setAttribute("class", cls);
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", ICONS[name] ?? name);
+  s.appendChild(p);
+  return s;
+};
+const md = (text) => DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: false }));
+const isGpt = (m) => /^gpt-/i.test(m || "");
 function shortModel(id = "") {
   if (/^gpt-/i.test(id)) return id.replace(/^gpt-([\d.]+)-?/i, "GPT-$1 ").replace(/\b[a-z]/g, (c) => c.toUpperCase()).trim();
   return id.replace(/^claude-/, "").replace(/-(\d)-(\d)$/, " $1.$2").replace(/^./, (c) => c.toUpperCase());
@@ -47,106 +70,202 @@ function modelFor(agent) {
   const m = info.models;
   if (info.runsOn?.[agent]) return shortModel(info.runsOn[agent].split(" ")[0]);
   const map = { advisor: m.advisor, coder: m.coder, designer: m.coder, researcher: m.worker, summarizer: m.triage, video: m.video, verifier: m.verifier };
-  return shortModel(map[agent] || "");
+  return shortModel(map[agent] || agents.find((a) => a.name === agent)?.model || "");
 }
-const isGpt = (m) => /^gpt-/i.test(m || "");
-function spotlight(node) {
-  node.classList.add("spot");
-  node.addEventListener("pointermove", (e) => {
-    const r = node.getBoundingClientRect();
-    node.style.setProperty("--mx", `${e.clientX - r.left}px`);
-    node.style.setProperty("--my", `${e.clientY - r.top}px`);
-  });
-  return node;
+const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+function fmtTime(at) {
+  if (!at) return "";
+  const d = new Date(at);
+  return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+function groupLabel(ts) {
+  const diff = (new Date().setHours(0, 0, 0, 0) - new Date(ts).setHours(0, 0, 0, 0)) / 864e5;
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  if (diff < 7) return "This week";
+  return new Date(ts).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
-// ── tab state ──────────────────────────────────────────────────────────────
-function makeChatView() {
-  const view = el("section", "view");
-  view.setAttribute("aria-live", "polite");
-  const empty = el("div", "empty");
-  const h = el("h2");
-  h.innerHTML = 'What should the <span class="grad">team</span> work on?';
-  empty.append(h, el("p", "", "Opus plans and delegates. Fable codes and advises, Sonnet researches, GPT handles images and UI tests."));
-  const sugg = el("div", "suggestions");
-  for (const [label, color, text, prefix] of SUGGESTIONS) {
-    const b = spotlight(el("button", "suggestion"));
-    const s = el("strong");
-    const dot = el("i");
-    dot.style.background = color;
-    s.append(dot, document.createTextNode(label));
-    b.append(s, document.createTextNode(text));
-    b.onclick = () => {
-      input.value = prefix === "/subagents" ? "/subagents " : prefix + text;
-      autoSize();
-      input.focus();
-    };
-    sugg.appendChild(b);
+// ── tabs ───────────────────────────────────────────────────────────────────
+function cur() {
+  return tabs.get(active);
+}
+function makeView(full = false) {
+  const view = el("section", `view${full ? " full" : ""}`);
+  view.hidden = true;
+  viewsEl.appendChild(view);
+  return view;
+}
+function welcome() {
+  const w = el("div", "welcome");
+  const h = el("header");
+  h.append(el("h2", "", "Agent Harness"), el("p", "", "Opus plans and delegates · Fable codes and advises · Sonnet researches · GPT handles images and UI tests"));
+  const start = el("div");
+  start.append(el("h3", "", "Start"));
+  const link = (ic, text, fn, key) => {
+    const b = el("button", "link");
+    b.append(icon(ic), el("span", "", text));
+    if (key) b.append(el("span", "k", key));
+    b.onclick = fn;
+    return b;
+  };
+  start.append(
+    link("plus", "New task", () => newTab(), "⌘T"),
+    link("folder", "Open folder…", () => $("sbFolder").click()),
+    link("people", "Create a subagent…", () => showSubagents()),
+    link("doc", "Summarize a document…", () => setPane("docs")),
+  );
+  start.append(el("h3", "", "Try"));
+  for (const [t, p] of [
+    ["Compare the animation libraries in my design library", "/research "],
+    ["Build a landing page hero with Magic UI components", "/code "],
+    ["Make an app icon: a node graph, soft gradient", "/image "],
+  ]) start.append(link("chevR", t, () => ((input.value = p + t), autoSize(), input.focus())));
+  const recent = el("div");
+  recent.append(el("h3", "", "Recent"));
+  for (const c of allChats.slice(0, 6)) recent.append(link("chat", c.title || "Untitled", () => openChat(c)));
+  if (!allChats.length) recent.append(el("p", "muted", "No chats in this folder yet."));
+  recent.append(el("h3", "", "Shortcuts"));
+  for (const [k, d] of [["⌘T", "New task tab"], ["⌘Enter", "Change the running task"], ["⌘K", "Search chats"], ["/", "Commands"]]) {
+    const r = el("div", "muted");
+    r.textContent = `${k}  ${d}`;
+    recent.append(r);
   }
-  empty.appendChild(sugg);
-  view.appendChild(empty);
-  return { view, empty };
+  w.append(h, start, recent);
+  return w;
 }
-
 function ensureChatTab(t) {
   let s = tabs.get(t.id);
   if (!s) {
-    const { view, empty } = makeChatView();
-    view.hidden = true;
-    viewsEl.appendChild(view);
-    s = { id: t.id, type: "chat", view, empty, live: null, liveText: "", timer: null, lastAgent: null, agents: new Map(), loaded: false };
+    const view = makeView();
+    const empty = welcome();
+    view.appendChild(empty);
+    s = { id: t.id, type: "chat", view, empty, live: null, liveText: "", timer: null, lastAgent: null, agents: new Map(), loaded: false, context: null };
     tabs.set(t.id, s);
     order.push(t.id);
   }
   s.info = t;
   return s;
 }
-
-function stateOf(id) {
-  return tabs.get(id);
+function addLocalTab(type, title, extra) {
+  const id = `${type}${++localSeq}`;
+  const s = { id, type, title, view: makeView(true), ...extra };
+  tabs.set(id, s);
+  order.push(id);
+  return s;
 }
-function cur() {
-  return tabs.get(active);
+function renderTabs() {
+  const bar = $("tabs");
+  bar.textContent = "";
+  for (const id of order) {
+    const s = tabs.get(id);
+    if (!s) continue;
+    const chat = s.type === "chat";
+    const b = el("div", `tab${id === active ? " active" : ""}`);
+    b.setAttribute("role", "tab");
+    b.tabIndex = 0;
+    if (chat && s.info.busy) b.appendChild(el("span", "spin"));
+    else b.appendChild(icon(chat ? "chat" : s.type === "doc" ? "doc" : "db", `ticon${chat && isGpt(s.info.model) ? " gpt" : ""}`));
+    b.appendChild(el("span", "t", chat ? s.info.title : s.title));
+    const x = el("button", "x");
+    x.appendChild(icon("x"));
+    x.title = "Close (⌘W)";
+    x.onclick = (e) => (e.stopPropagation(), closeTab(id));
+    b.appendChild(x);
+    b.title = chat ? `${s.info.title} · ${shortModel(s.info.model)}${s.info.busy ? " · working" : ""}` : s.title;
+    b.onclick = () => activate(id);
+    b.onauxclick = (e) => e.button === 1 && closeTab(id);
+    bar.appendChild(b);
+  }
+  bar.querySelector(".tab.active")?.scrollIntoView({ inline: "nearest", block: "nearest" });
+}
+function activate(id) {
+  if (!tabs.has(id)) return;
+  active = id;
+  for (const [tid, s] of tabs) s.view.hidden = tid !== id;
+  const s = tabs.get(id);
+  if (s.type === "chat") {
+    void api.focusTab(id);
+    if (!s.loaded) {
+      s.loaded = true;
+      api.tabHistory(id).then((items) => items.length && renderHistory(s, items));
+    }
+    if (!s.context && s.info.sessionId) api.context(id).then((c) => c && ((s.context = c), renderStatus()));
+  }
+  renderTabs();
+  syncToolbar();
+  renderPane();
+  input.focus();
+}
+async function newTab(opts = {}) {
+  const t = await api.newTab(opts);
+  const s = ensureChatTab(t);
+  if (!opts.chatId) s.loaded = true;
+  activate(t.id);
+  return s;
+}
+function removeTabLocal(id) {
+  const s = tabs.get(id);
+  if (!s) return;
+  s.view.remove();
+  tabs.delete(id);
+  order = order.filter((x) => x !== id);
+  if (active === id) active = null;
+}
+async function closeTab(id) {
+  const s = tabs.get(id);
+  if (!s) return;
+  const idx = order.indexOf(id);
+  if (s.type === "chat") await api.closeTab(id);
+  removeTabLocal(id);
+  if (!order.length) return newTab();
+  activate(order[Math.max(0, idx - 1)]);
 }
 
-// ── rendering inside a tab ─────────────────────────────────────────────────
+// ── chat rendering ─────────────────────────────────────────────────────────
 function atBottom(v) {
   return v.scrollHeight - v.scrollTop - v.clientHeight < 140;
 }
 function append(s, node) {
-  node.classList.add("enter");
-  node.addEventListener("animationend", () => node.classList.remove("enter"), { once: true });
   const stick = atBottom(s.view);
   s.empty.hidden = true;
   s.view.appendChild(node);
   if (stick) s.view.scrollTop = s.view.scrollHeight;
   return node;
 }
-function addUser(s, text, source, queued) {
-  const m = el("div", "msg user");
-  if (source === "terminal") {
-    const f = el("span", "from");
-    f.innerHTML = `${svg("M4 17l6-6-6-6M12 19h8")} from terminal`;
-    m.appendChild(f);
-  }
-  m.appendChild(el("div", "bubble", text));
+function who(kind, label, extra) {
+  const w = el("div", "who");
+  const av = el("span", `avatar${kind === "ai" ? " ai" : kind === "gpt" ? " gpt" : ""}`, kind === "user" ? "Y" : kind === "gpt" ? "G" : "C");
+  w.append(av, el("span", "", label));
+  if (extra) w.append(el("span", "src", extra));
+  return w;
+}
+function addUser(s, text, source, queued, change) {
+  const m = el("div", `msg user${change ? " change" : ""}`);
+  m.append(who("user", "You", change ? "· change while working" : source === "terminal" ? "· from terminal" : source === "auto" ? "· re-sent automatically" : queued ? "· queued" : ""));
+  m.append(el("div", "bubble", text));
   append(s, m);
   s.view.scrollTop = s.view.scrollHeight;
-  if (queued) addNote(s, "Queued. Runs after the current turn.");
+}
+function assistantShell(s) {
+  const m = el("div", "msg assistant");
+  const gpt = isGpt(s.info.model);
+  m.append(who(gpt ? "gpt" : "ai", shortModel(s.info.model)));
+  const b = el("div", "bubble");
+  m.append(b);
+  return { m, b };
 }
 function addAssistant(s, text) {
-  const m = el("div", "msg assistant");
-  const b = el("div", "bubble");
+  const { m, b } = assistantShell(s);
   b.innerHTML = md(text);
-  m.appendChild(b);
   append(s, m);
 }
 function startLive(s) {
-  const m = el("div", "msg assistant");
-  s.live = el("div", "bubble streaming");
-  m.appendChild(s.live);
-  append(s, m);
+  const { m, b } = assistantShell(s);
+  b.classList.add("streaming");
+  s.live = b;
   s.liveText = "";
+  append(s, m);
 }
 function flushLive(s) {
   if (!s.live) return;
@@ -169,30 +288,30 @@ function endLive(s, finalText) {
 }
 function addAgent(s, id, agent, description) {
   endLive(s);
-  const wrap = el("div", "activity");
   const card = el("div", "agent-card");
-  card.style.setProperty("--c", agentColor(agent));
   const head = el("div", "agent-head");
-  const chip = el("span", "agent-chip");
-  chip.style.setProperty("--c", agentColor(agent));
-  chip.append(el("span", "", agent));
-  const model = modelFor(agent);
-  if (model) chip.append(el("span", "model", model));
-  const spin = el("span", "spinner");
-  spin.style.setProperty("--c", agentColor(agent));
+  const state = el("span", "state");
+  state.appendChild(el("span", "spin"));
   const count = el("span", "agent-count", "");
-  head.append(chip, el("span", "agent-desc", description), count, spin);
+  head.append(icon("chevR", "chev-r"), state, el("span", "agent-name", agent), el("span", "agent-model", modelFor(agent)), el("span", "agent-desc", description), count);
   const tools = el("div", "agent-tools");
   head.onclick = () => card.classList.toggle("open");
   card.append(head, tools);
-  wrap.appendChild(card);
-  append(s, wrap);
-  const entry = { card, tools, count, n: 0 };
+  append(s, card);
+  const entry = { card, state, tools, count, n: 0, done: false };
   s.agents.set(id, entry);
   s.lastAgent = entry;
 }
+function finishAgents(s) {
+  for (const c of s.agents.values()) {
+    if (c.done) continue;
+    c.done = true;
+    c.state.textContent = "";
+    c.state.appendChild(icon("check"));
+  }
+}
 function addTool(s, name, summary, sub) {
-  if (name === "AskUserQuestion") return; // shown as a question card instead
+  if (name === "AskUserQuestion") return; // shown as a question card
   const row = el("div", "tool-row");
   row.append(el("b", "", name), document.createTextNode(` ${summary}`));
   if (sub && s.lastAgent) {
@@ -207,49 +326,121 @@ function addTool(s, name, summary, sub) {
   w.appendChild(row);
   append(s, w);
 }
-function finishAgents(s) {
-  for (const c of s.agents.values()) c.card.classList.add("done");
-}
 function addVerify(s, e) {
   endLive(s);
-  const existing = s.view.querySelector(".verify.running");
+  s.view.querySelector(".verify.running")?.remove();
+  const v = el("div", `verify${e.status === "running" ? " running" : ""}`);
   if (e.status === "running") {
     finishAgents(s);
-    const v = el("div", "verify running");
-    const badge = el("span", "badge");
-    const spin = el("span", "spinner");
-    spin.style.setProperty("--c", "var(--a-verifier)");
-    badge.append(spin, document.createTextNode(`Verifier checking${e.round > 1 ? ` (round ${e.round})` : ""}`));
-    v.append(badge, el("span", "", modelFor("verifier")));
+    v.append(el("span", "spin"), el("span", "", `Verifier (${modelFor("verifier")}) checking${e.round > 1 ? `, round ${e.round}` : ""}`));
     append(s, v);
     return;
   }
-  if (existing) existing.remove();
-  const v = el("div", `verify ${e.status}`);
-  const badge = el("span", "badge", e.status === "pass" ? "✓ Verified" : "✕ Verifier found problems, fixing");
-  v.append(badge, el("span", "", modelFor("verifier")));
+  const lab = el("span", `label ${e.status === "pass" ? "ok" : "bad"}`, e.status === "pass" ? "Verified" : "Changes requested");
+  v.append(lab, el("span", "", `by ${modelFor("verifier")}`));
   append(s, v);
   if (e.status === "fail" && e.feedback) {
     const d = el("div", "verify-detail", e.feedback.slice(0, 3000));
     d.hidden = true;
-    badge.onclick = () => (d.hidden = !d.hidden);
+    lab.style.cursor = "pointer";
+    lab.onclick = () => (d.hidden = !d.hidden);
     append(s, d);
   }
 }
+function addAdvice(s, status) {
+  if (status === "answered") {
+    const last = [...s.view.querySelectorAll(".advice")].pop();
+    if (last) {
+      last.querySelector(".spin")?.remove();
+      last.querySelector(".txt").textContent = `Consulted the advisor (${shortModel(info.models.advisor)})`;
+    }
+    return;
+  }
+  endLive(s);
+  const a = el("div", "advice");
+  a.append(el("span", "label done", "advisor"), el("span", "spin"), el("span", "txt", `Asking ${shortModel(info.models.advisor)} for advice…`));
+  append(s, a);
+}
 function addNote(s, text, cls = "") {
   append(s, el("div", `note ${cls}`, text));
+}
+function addQuestion(s, id, questions) {
+  endLive(s);
+  const card = el("div", "question");
+  card.dataset.qid = id;
+  const picks = new Map();
+  const others = new Map();
+  const top = el("div", "q-top");
+  top.append(icon("q"), el("span", "", `${shortModel(s.info.model)} has a question`));
+  card.appendChild(top);
+  const body = el("div", "q-body");
+  for (const q of questions) {
+    const head = el("div", "q-text", q.question);
+    if (q.header) head.prepend(el("span", "label accent", q.header), document.createTextNode(" "));
+    body.appendChild(head);
+    picks.set(q.question, new Set());
+    const opts = [];
+    for (const o of q.options) {
+      const b = el("button", `opt${q.multiSelect ? " multi" : ""}`);
+      const ol = el("span", "ol");
+      ol.append(el("span", "", o.label));
+      if (o.description) ol.append(el("small", "", o.description));
+      b.appendChild(ol);
+      b.onclick = () => {
+        const set = picks.get(q.question);
+        if (!q.multiSelect) {
+          set.clear();
+          opts.forEach((n) => n.classList.remove("picked"));
+        }
+        set.has(o.label) ? set.delete(o.label) : set.add(o.label);
+        b.classList.toggle("picked", set.has(o.label));
+        if (!q.multiSelect && questions.length === 1) submit();
+      };
+      opts.push(b);
+      body.appendChild(b);
+    }
+    const other = el("div", "other");
+    const inp = el("input", "input");
+    inp.placeholder = "Other…";
+    inp.onkeydown = (e) => e.key === "Enter" && submit();
+    others.set(q.question, inp);
+    other.appendChild(inp);
+    body.appendChild(other);
+  }
+  body.appendChild(el("div", "q-answer"));
+  const acts = el("div", "q-actions");
+  const skip = el("button", "btn", "Skip");
+  const send = el("button", "btn primary", "Answer");
+  acts.append(skip, send);
+  card.append(body, acts);
+  function submit() {
+    const answers = {};
+    for (const q of questions) answers[q.question] = others.get(q.question).value.trim() || [...picks.get(q.question)].join(", ") || "(no answer)";
+    api.answer(s.id, id, answers);
+  }
+  send.onclick = submit;
+  skip.onclick = () => api.answer(s.id, id, Object.fromEntries(questions.map((q) => [q.question, "(skipped, use your judgment)"])));
+  append(s, card);
+  s.view.scrollTop = s.view.scrollHeight;
+}
+function markAnswered(s, id, answers) {
+  const card = s.view.querySelector(`.question[data-qid="${id}"]`);
+  if (!card) return;
+  card.classList.add("done");
+  card.querySelector(".q-answer").textContent = `Answered: ${Object.values(answers).join(" · ") || "skipped"}`;
 }
 function clearView(s) {
   s.live = null;
   s.lastAgent = null;
   s.agents.clear();
+  s.context = null;
   [...s.view.children].forEach((n) => n !== s.empty && n.remove());
   s.empty.hidden = false;
 }
 function renderHistory(s, items) {
   clearView(s);
   for (const it of items) {
-    if (it.role === "user") addUser(s, it.text);
+    if (it.role === "user") addUser(s, it.text, undefined, false, it.change);
     else if (it.role === "assistant") addAssistant(s, it.text);
     else if (it.role === "agent") {
       const [agent, ...rest] = it.text.split(": ");
@@ -263,256 +454,20 @@ function renderHistory(s, items) {
   s.view.scrollTop = s.view.scrollHeight;
 }
 
-// ── questions from the agent (AskUserQuestion) ─────────────────────────────
-function addQuestion(s, id, questions) {
-  endLive(s);
-  const card = el("div", "question");
-  card.dataset.qid = id;
-  const picks = new Map(); // question text → Set(labels)
-  const others = new Map();
-  for (const q of questions) {
-    const head = el("div", "q-head");
-    head.innerHTML = `${svg("M12 18h.01M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3")} ${q.header ? q.header : "Question"}`;
-    card.append(head, el("div", "q-text", q.question));
-    const opts = el("div", "opts");
-    picks.set(q.question, new Set());
-    for (const o of q.options) {
-      const b = el("button", "opt");
-      b.append(el("span", "", o.label));
-      if (o.description) b.append(el("small", "", o.description));
-      b.onclick = () => {
-        const set = picks.get(q.question);
-        if (!q.multiSelect) {
-          set.clear();
-          opts.querySelectorAll(".opt").forEach((n) => n.classList.remove("picked"));
-        }
-        if (set.has(o.label)) set.delete(o.label);
-        else set.add(o.label);
-        b.classList.toggle("picked", set.has(o.label));
-        if (!q.multiSelect && questions.length === 1) submitAnswers();
-      };
-      opts.appendChild(b);
-    }
-    const other = el("div", "other");
-    const inp = el("input");
-    inp.placeholder = "Something else…";
-    others.set(q.question, inp);
-    inp.onkeydown = (e) => e.key === "Enter" && submitAnswers();
-    other.appendChild(inp);
-    card.append(opts, other);
-  }
-  const acts = el("div", "q-actions");
-  const skip = el("button", "ghost", "Skip");
-  const send = el("button", "primary", "Answer");
-  acts.append(skip, send);
-  card.append(acts, el("div", "q-answer", ""));
-  function submitAnswers() {
-    const answers = {};
-    for (const q of questions) {
-      const typed = others.get(q.question).value.trim();
-      const chosen = [...picks.get(q.question)];
-      answers[q.question] = typed || chosen.join(", ") || "(no answer)";
-    }
-    api.answer(s.id, id, answers);
-  }
-  send.onclick = submitAnswers;
-  skip.onclick = () => api.answer(s.id, id, Object.fromEntries(questions.map((q) => [q.question, "(skipped, use your judgment)"])));
-  append(s, card);
-  s.view.scrollTop = s.view.scrollHeight;
-  if (s.id !== active) renderTabs();
-}
-function markAnswered(s, id, answers) {
-  const card = s.view.querySelector(`.question[data-qid="${id}"]`);
-  if (!card) return;
-  card.classList.add("done");
-  card.querySelector(".q-answer").textContent = `Answered: ${Object.values(answers).join(" · ") || "skipped"}`;
-}
-
-// ── advisor (consulted automatically, like Claude Code) ────────────────────
-function addAdvice(s, status) {
-  if (status === "answered") {
-    const last = [...s.view.querySelectorAll(".advice")].pop();
-    if (last) {
-      last.querySelector(".spinner")?.remove();
-      last.querySelector(".txt").textContent = "Consulted the advisor";
-    }
-    return;
-  }
-  endLive(s);
-  const a = el("div", "advice");
-  const chip = el("span", "agent-chip");
-  chip.append(el("span", "", "advisor"), el("span", "model", shortModel(info.models.advisor)));
-  const spin = el("span", "spinner");
-  spin.style.setProperty("--c", "var(--a-advisor)");
-  a.append(chip, el("span", "txt", "Hit something hard, asking the advisor…"), spin);
-  append(s, a);
-}
-
-// ── usage ──────────────────────────────────────────────────────────────────
-let usageState = null;
-function fmtReset(at) {
-  if (!at) return "";
-  const d = new Date(at);
-  return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
-}
-function meter(w) {
-  const pct = w.utilization == null ? null : Math.round(w.utilization * 100);
-  const m = el("div", `meter${pct >= 100 || w.status === "rejected" ? " full" : pct >= 80 ? " warn" : ""}`);
-  m.append(el("span", "", w.label), el("span", "", pct == null ? "?" : `${pct}%`));
-  const bar = el("div", "bar");
-  const fill = el("i");
-  fill.style.width = `${Math.min(100, pct ?? 0)}%`;
-  bar.appendChild(fill);
-  m.appendChild(bar);
-  if (w.resetsAt) m.title = `Resets ${fmtReset(w.resetsAt)}`;
-  return m;
-}
-async function refreshUsage(u) {
-  usageState = u ?? (await api.usage());
-  const box = $("usageBtn");
-  box.textContent = "";
-  const windows = usageState.usage?.windows ?? [];
-  if (!windows.length) {
-    box.hidden = true;
-    return;
-  }
-  box.hidden = false;
-  for (const w of windows.filter((w) => ["five_hour", "seven_day"].includes(w.key))) box.appendChild(meter(w));
-}
-async function showUsage() {
-  await refreshUsage();
-  const u = usageState;
-  const box = el("div", "usage-big");
-  box.appendChild(el("div", "chat-group", "Claude plan"));
-  if (!u.usage?.windows?.length) box.appendChild(el("p", "", "No usage reported yet. It shows up after your first message."));
-  for (const w of u.usage?.windows ?? []) {
-    const m = meter(w);
-    if (w.resetsAt) m.appendChild(el("span", "", `Resets ${fmtReset(w.resetsAt)}`));
-    box.appendChild(m);
-  }
-  if (u.usage) box.appendChild(el("p", "", `As of ${new Date(u.usage.at).toLocaleTimeString()}.`));
-  box.appendChild(el("div", "chat-group", "ChatGPT plan"));
-  box.appendChild(el("p", "", u.codex.ok ? `Signed in. ${u.gpt} is ready.` : u.codex.detail));
-  const c = el("div", `callout${u.limited ? " bad" : ""}`);
-  c.textContent = u.limited
-    ? `Claude is at its limit until ${fmtReset(u.usage?.resetsAt)}. New tasks and the task that hit the limit continue on ${shortModel(u.gpt)}.`
-    : `If Claude runs out, the task that hit the limit continues on ${shortModel(u.gpt)} with your ChatGPT plan, and new tabs start there until Claude resets.`;
-  box.appendChild(c);
-  modal("Usage", box);
-}
-$("usageBtn").onclick = showUsage;
-
-// ── connections: MCP servers and apps ──────────────────────────────────────
-let connState = [];
-function connSummary(list) {
-  const on = list.filter((c) => c.status === "connected").length;
-  const bad = list.filter((c) => ["failed", "needs-auth"].includes(c.status)).length;
-  $("connCount").textContent = `${on} connected${bad ? ` · ${bad} need attention` : ""}`;
-  $("connDot").className = `dot ${bad ? "warn" : on ? "ok" : ""}`;
-}
-async function refreshConnections(reconnect) {
-  connState = await api.connections(reconnect);
-  connSummary(connState);
-  return connState;
-}
-async function showConnections() {
-  const box = el("div");
-  const render = async (reconnect) => {
-    box.textContent = "";
-    box.appendChild(el("p", "", reconnect ? `Reconnecting ${reconnect}…` : "Checking servers…"));
-    const list = await refreshConnections(reconnect);
-    box.textContent = "";
-    // Accounts & memory apps
-    box.appendChild(el("div", "chat-group", "Accounts & apps"));
-    const apps = [
-      { name: "Claude plan", ok: !!info.auth.plan || !info.subscriptionOnly, sub: info.auth.plan ? `Signed in (${info.auth.plan})` : !info.subscriptionOnly ? "API billing allowed (HARNESS_ALLOW_API=1)" : info.auth.error?.split("\n")[0] || "Not signed in" },
-      { name: "ChatGPT plan (Codex)", ok: info.codex.ok, sub: info.codex.detail },
-      { name: "claude-mem", ok: memStatus?.claudeMem.up, sub: memStatus?.claudeMem.up ? memStatus.claudeMem.url : "Not running" },
-      { name: "Hindsight", ok: memStatus?.hindsight.up, sub: memStatus?.hindsight.up ? memStatus.hindsight.url : "Not running (docker compose up -d hindsight)" },
-    ];
-    for (const a of apps) {
-      const r = el("div", "conn-row");
-      r.append(el("span", `status-dot ${a.ok ? "connected" : "failed"}`), el("div", "name", a.name), el("div", "sub", a.sub));
-      box.appendChild(r);
-    }
-    // MCP servers
-    box.appendChild(el("div", "chat-group", `MCP servers (${list.length})`));
-    if (!list.length) box.appendChild(el("p", "", "No MCP servers found."));
-    for (const c of list) {
-      const r = el("div", "conn-row");
-      const name = el("div", "name", c.name);
-      name.appendChild(el("span", "src", c.source));
-      const detail =
-        c.status === "connected"
-          ? `${c.tools} tool${c.tools === 1 ? "" : "s"}${c.target ? ` · ${c.target}` : ""}`
-          : c.status === "needs-auth"
-            ? "Needs sign-in: open Claude Code (claude), run /mcp, and sign in to it"
-            : c.status === "disabled"
-              ? "Turned off"
-              : c.error || c.target || c.status;
-      const sub = el("div", "sub", detail);
-      sub.title = detail;
-      const acts = el("div", "acts");
-      if (["failed", "needs-auth", "pending"].includes(c.status)) {
-        const rc = el("button", "ghost", "Reconnect");
-        rc.onclick = () => render(c.name);
-        acts.appendChild(rc);
-      }
-      const tg = el("button", "ghost", c.enabled ? "Turn off" : "Turn on");
-      tg.onclick = async () => {
-        await api.mcpToggle(c.name, !c.enabled);
-        render();
-      };
-      acts.appendChild(tg);
-      if (c.removable) {
-        const rm = el("button", "ghost", "Remove");
-        rm.onclick = async () => {
-          await api.mcpRemove(c.name);
-          render();
-        };
-        acts.appendChild(rm);
-      }
-      r.append(el("span", `status-dot ${c.status}`), name, sub, acts);
-      box.appendChild(r);
-    }
-    // Add
-    box.appendChild(el("div", "chat-group", "Add an MCP server"));
-    const form = el("div", "add-conn");
-    const nm = el("input");
-    nm.placeholder = "Name, e.g. notion";
-    const spec = el("input");
-    spec.placeholder = "URL (https://…) or command (npx -y some-mcp-server)";
-    const add = el("button", "primary", "Add");
-    add.onclick = async () => {
-      try {
-        await api.mcpAdd(nm.value, spec.value);
-        render();
-      } catch (err) {
-        add.textContent = "Check the name and address";
-      }
-    };
-    form.append(nm, spec, add);
-    box.appendChild(form);
-    box.appendChild(el("p", "", "Servers you add are saved in mcp-servers.json and available to every tab from the next message. Servers from your Claude Code setup and claude.ai connectors show up here automatically."));
-  };
-  modal("MCP servers & apps", box);
-  render();
-}
-$("connBtn").onclick = showConnections;
-
-// ── events from the engine, per tab ────────────────────────────────────────
+// ── events from the engine ─────────────────────────────────────────────────
 api.onEvent(({ tabId, event: e }) => {
-  const s = stateOf(tabId);
+  const s = tabs.get(tabId);
   if (!s) return;
   switch (e.type) {
     case "user":
-      addUser(s, e.text, e.source, e.queued);
+      addUser(s, e.text, e.source, e.queued, e.change);
       break;
     case "busy":
       if (!e.busy) {
         endLive(s);
         finishAgents(s);
         refreshChats();
+        refreshDocs();
       }
       break;
     case "text-delta":
@@ -550,7 +505,7 @@ api.onEvent(({ tabId, event: e }) => {
       addNote(s, e.message, "error");
       break;
     case "note":
-      addNote(s, e.text, /^FAIL/.test(e.text) ? "error" : /usage limit/.test(e.text) ? "error" : "");
+      addNote(s, e.text, /usage limit|^FAIL/.test(e.text) ? "error" : "");
       break;
     case "question":
       addQuestion(s, e.id, e.questions);
@@ -564,128 +519,114 @@ api.onEvent(({ tabId, event: e }) => {
     case "usage":
       refreshUsage();
       break;
+    case "context":
+      s.context = e.context;
+      renderStatus();
+      break;
   }
 });
-
-// Host tab list → reconcile chat tabs (memory tabs are local).
 api.onTabs((list) => {
   const seen = new Set();
   for (const t of list) {
     ensureChatTab(t);
     seen.add(t.id);
   }
-  for (const [id, s] of tabs) {
-    if (s.type === "chat" && !seen.has(id)) removeTabLocal(id);
-  }
+  for (const [id, s] of tabs) if (s.type === "chat" && !seen.has(id)) removeTabLocal(id);
+  if (!active || !tabs.has(active)) active = order[order.length - 1];
   renderTabs();
-  syncTopbar();
+  syncToolbar();
 });
-api.onFocusTab((id) => {
-  if (tabs.has(id)) activate(id);
-});
+api.onFocusTab((id) => tabs.has(id) && activate(id));
 
-// ── tab bar ────────────────────────────────────────────────────────────────
-function renderTabs() {
-  const bar = $("tabs");
-  bar.textContent = "";
-  for (const id of order) {
-    const s = tabs.get(id);
-    if (!s) continue;
-    const isMem = s.type === "memory";
-    const b = el("div", `tab${id === active ? " active" : ""}${!isMem && s.info.busy ? " busy" : ""}`);
-    b.setAttribute("role", "tab");
-    b.tabIndex = 0;
-    const dot = el("span", `tab-dot${isMem ? " mem" : isGpt(s.info?.model) ? " gpt" : ""}`);
-    const title = isMem ? s.title : s.info.title;
-    const x = el("button", "x");
-    x.innerHTML = svg("M6 6l12 12M18 6L6 18");
-    x.title = "Close tab (⌘W)";
-    x.onclick = (e) => {
-      e.stopPropagation();
-      closeTab(id);
-    };
-    b.append(dot, el("span", "t", title), x);
-    b.title = isMem ? s.title : `${s.info.title} · ${shortModel(s.info.model)}${s.info.busy ? " · working" : ""}`;
-    b.onclick = () => activate(id);
-    b.onauxclick = (e) => e.button === 1 && closeTab(id);
-    bar.appendChild(b);
-  }
-  bar.querySelector(".tab.active")?.scrollIntoView({ inline: "nearest", block: "nearest" });
-}
-
-function activate(id) {
-  if (!tabs.has(id)) return;
-  active = id;
-  for (const [tid, s] of tabs) s.view.hidden = tid !== id;
-  const s = tabs.get(id);
-  if (s.type === "chat") {
-    void api.focusTab(id);
-    if (!s.loaded) {
-      s.loaded = true;
-      api.tabHistory(id).then((items) => items.length && renderHistory(s, items));
-    }
-  }
-  renderTabs();
-  syncTopbar();
-  markActiveChat();
-  input.focus();
-}
-
-async function newTab(opts = {}) {
-  const t = await api.newTab(opts);
-  const s = ensureChatTab(t);
-  if (!opts.chatId) s.loaded = true;
-  activate(t.id);
-  return s;
-}
-
-function removeTabLocal(id) {
-  const s = tabs.get(id);
-  if (!s) return;
-  s.view.remove();
-  tabs.delete(id);
-  order = order.filter((x) => x !== id);
-  if (active === id) active = null;
-}
-
-async function closeTab(id) {
-  const s = tabs.get(id);
-  if (!s) return;
-  const idx = order.indexOf(id);
-  if (s.type === "chat") await api.closeTab(id);
-  removeTabLocal(id);
-  if (!order.length) return newTab();
-  activate(order[Math.max(0, idx - 1)]);
-}
-
-// ── top bar ────────────────────────────────────────────────────────────────
-function syncTopbar() {
+// ── toolbar & status bar ───────────────────────────────────────────────────
+function syncToolbar() {
   const s = cur();
   if (!s) return;
   const chat = s.type === "chat";
-  $("topbar").querySelectorAll(".top-actions > *").forEach((n) => (n.hidden = !chat));
+  $("toolbar").querySelector(".top-actions").hidden = !chat;
   $("composerWrap").hidden = !chat;
   $("chatTitle").textContent = chat ? s.info.title : s.title;
-  if (!chat) return;
-  $("verifyBtn").classList.toggle("on", s.info.verify);
-  $("verifyBtn").hidden = s.info.kind === "gpt";
-  $("forkBtn").hidden = s.info.kind === "gpt";
-  $("modelSelect").value = s.info.model;
-  $("modelDot").classList.toggle("gpt", isGpt(s.info.model));
-  setBusyUi(s.info.busy);
+  if (chat) {
+    $("verifyBtn").classList.toggle("on", s.info.verify);
+    $("verifyBtn").hidden = s.info.kind === "gpt";
+    $("forkBtn").hidden = s.info.kind === "gpt";
+    $("modelSelect").value = s.info.model;
+    setBusyUi(s.info.busy);
+  }
+  renderStatus();
 }
 function setBusyUi(b) {
-  $("sendBtn").hidden = b;
+  $("sendBtn").textContent = b ? "Queue" : "Send";
+  $("sendBtn").title = b ? "Run after the current turn (Enter)" : "Send (Enter)";
+  $("changeBtn").hidden = !b;
   $("stopBtn").hidden = !b;
   $("composer").classList.toggle("running", b);
-  const hint = $("hint");
-  hint.classList.toggle("working", b);
+  $("hint").textContent = b
+    ? "Working · ⌘Enter or /change corrects it now without stopping · Enter queues"
+    : "Enter to send · Shift+Enter new line · / for commands";
+}
+function miniGrid(ctx) {
+  const g = el("span", "mini-grid");
+  // Squeeze the 100-square grid into 20 (each mini square = 5% of the window).
+  const cells = (ctx?.grid ?? []).flat();
+  const shown = Array.from({ length: 20 }, (_, i) => {
+    const chunk = cells.slice(i * 5, i * 5 + 5);
+    const used = chunk.filter((c) => c.fill);
+    const ids = used.map((c) => c.id);
+    const id = ids.sort((a, b) => ids.filter((x) => x === b).length - ids.filter((x) => x === a).length)[0] ?? "free_space";
+    return { id, fill: chunk.length ? used.reduce((n, c) => n + c.fill, 0) / chunk.length : 0 };
+  });
+  for (const c of shown) {
+    const i = el("i");
+    if (c.fill) {
+      const b = el("b");
+      b.style.height = `${Math.round(c.fill * 100)}%`;
+      b.style.top = "0";
+      b.style.background = ctxColor(c.id);
+      i.appendChild(b);
+    }
+    g.appendChild(i);
+  }
+  return g;
+}
+function renderStatus() {
+  const s = cur();
+  const folder = (info?.workspace ?? "").split(/[\\/]/).pop();
+  $("sbFolder").textContent = "";
+  $("sbFolder").append(icon("folder"), el("span", "", folder));
+  $("crumbFolder").textContent = folder;
+  const chat = s?.type === "chat";
+  $("sbModel").hidden = !chat;
+  $("sbVerify").hidden = !chat || s.info.kind === "gpt";
+  if (chat) {
+    $("sbModel").textContent = shortModel(s.info.model);
+    $("sbVerify").textContent = `Verifier ${s.info.verify ? "on" : "off"}`;
+  }
   const running = [...tabs.values()].filter((t) => t.type === "chat" && t.info.busy).length;
-  hint.textContent = b
-    ? "Working… queue another message, ask a btw, or open a new tab (⌘T) for another task"
-    : running
-      ? `${running} task${running === 1 ? "" : "s"} running in other tabs · Enter to send`
-      : "Enter to send · Shift+Enter for a new line · ⌘T new tab · only GitHub pushes ask for approval";
+  $("sbTasks").textContent = running ? `${running} running` : "";
+  // context grid
+  const sc = $("sbContext");
+  sc.textContent = "";
+  sc.hidden = !chat;
+  if (chat) {
+    sc.append(miniGrid(s.context), el("span", "", s.context ? `${s.context.percentage}% · ${fmtTokens(s.context.total)}/${fmtTokens(s.context.max)}` : "Context"));
+  }
+  // Claude usage
+  const su = $("sbUsage");
+  su.textContent = "";
+  const w = usageState?.usage?.windows?.find((x) => x.key === "five_hour") ?? usageState?.usage?.windows?.[0];
+  if (w && w.utilization != null) {
+    const pct = Math.round(w.utilization * 100);
+    const bar = el("span", `mini-bar${pct >= 100 ? " bad" : pct >= 80 ? " warn" : ""}`);
+    const fill = el("i");
+    fill.style.width = `${Math.min(100, pct)}%`;
+    bar.appendChild(fill);
+    su.append(el("span", "", "Claude"), bar, el("span", "", `${pct}%`));
+    su.className = `sb${usageState.limited ? " bad" : pct >= 80 ? " warn" : ""}`;
+  } else su.append(el("span", "", info?.subscriptionOnly === false ? "Claude · API" : "Claude"));
+  const sg = $("sbGpt");
+  sg.textContent = "";
+  sg.append(el("span", `dot ${info?.codex?.ok ? "ok" : "warn"}`), el("span", "", "ChatGPT"));
 }
 function buildModelSelect() {
   const sel = $("modelSelect");
@@ -708,7 +649,7 @@ function buildModelSelect() {
 }
 $("modelSelect").onchange = async (e) => {
   const s = cur();
-  const model = e.target.value; // read before the tab list refresh resets the picker
+  const model = e.target.value;
   const r = await api.setModel(s.id, model);
   if (r.newTab) {
     const t = ensureChatTab({ id: r.tabId, kind: isGpt(model) ? "gpt" : "claude", model, title: "New chat", busy: false, verify: true, sessionId: null });
@@ -717,67 +658,207 @@ $("modelSelect").onchange = async (e) => {
     addNote(t, `${shortModel(model)} can't continue a ${isGpt(model) ? "Claude" : "GPT"} conversation, so it opened in a new tab.`);
   }
 };
-$("verifyBtn").onclick = async () => {
-  const s = cur();
-  await api.setVerify(s.id, !s.info.verify);
-};
+$("verifyBtn").onclick = () => cur()?.type === "chat" && api.setVerify(cur().id, !cur().info.verify);
+$("sbVerify").onclick = () => $("verifyBtn").click();
+$("sbModel").onclick = () => $("modelSelect").focus();
+$("sbContext").onclick = () => showContext();
+$("sbUsage").onclick = () => showUsage();
+$("sbGpt").onclick = () => showUsage();
 
-// ── sidebar: chats ─────────────────────────────────────────────────────────
-function groupLabel(ts) {
-  const d = new Date(ts);
-  const today = new Date();
-  const diff = (today.setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5;
-  if (diff <= 0) return "Today";
-  if (diff === 1) return "Yesterday";
-  if (diff < 7) return "This week";
-  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+// ── sidebar panes ──────────────────────────────────────────────────────────
+const PANES = { chats: "Chats", docs: "Documents", memory: "Memory", connections: "MCP servers & apps", team: "Team" };
+function setPane(p) {
+  pane = p;
+  document.querySelectorAll(".act[data-pane]").forEach((b) => b.classList.toggle("active", b.dataset.pane === p));
+  $("paneTitle").textContent = PANES[p];
+  $("paneSearch").value = "";
+  $("paneSearch").placeholder = p === "docs" ? "Search documents" : p === "chats" ? "Search chats (⌘K)" : "Filter";
+  renderPane();
+  if (p === "docs") refreshDocs();
+  if (p === "connections" && !connState.length) refreshConnections();
+  if (p === "memory") refreshMemory();
 }
-function openSessionIds() {
-  return new Set([...tabs.values()].filter((t) => t.type === "chat" && t.info.sessionId).map((t) => t.info.sessionId));
+document.querySelectorAll(".act[data-pane]").forEach((b) => (b.onclick = () => setPane(b.dataset.pane)));
+$("paneSearch").oninput = () => renderPane();
+$("statusAct").onclick = () => showStatus();
+
+function section(body, key, title, count, items) {
+  const head = el("div", `section-title${collapsed.has(key) ? " collapsed" : ""}`);
+  head.append(icon("chevD"), el("span", "", title));
+  if (count !== undefined) head.append(el("span", "count", String(count)));
+  head.onclick = () => {
+    collapsed.has(key) ? collapsed.delete(key) : collapsed.add(key);
+    renderPane();
+  };
+  body.appendChild(head);
+  if (!collapsed.has(key)) items();
 }
-function renderChats() {
-  const q = $("chatSearch").value.trim().toLowerCase();
-  const list = $("chatList");
-  list.textContent = "";
-  const open = openSessionIds();
-  let group = "";
-  for (const c of allChats.filter((c) => !q || (c.title || "").toLowerCase().includes(q))) {
-    const g = groupLabel(c.updated);
-    if (g !== group) {
-      group = g;
-      list.appendChild(el("div", "chat-group", g));
-    }
-    const b = el("button", "chat-item");
-    b.dataset.id = c.id;
-    b.title = c.title;
-    if (open.has(c.id)) b.appendChild(el("span", "open-dot"));
-    b.appendChild(el("span", "t", c.title || "Untitled"));
-    if (c.kind === "gpt") b.appendChild(el("span", "badge-gpt", "GPT"));
-    b.onclick = () => openChat(c);
-    list.appendChild(b);
+function paneActions(list) {
+  const a = $("paneActions");
+  a.textContent = "";
+  for (const [ic, title, fn] of list) {
+    const b = el("button", "icon-btn");
+    b.title = title;
+    b.appendChild(icon(ic));
+    b.onclick = fn;
+    a.appendChild(b);
   }
-  markActiveChat();
 }
-function markActiveChat() {
-  const sid = cur()?.info?.sessionId;
-  document.querySelectorAll(".chat-item").forEach((n) => n.classList.toggle("active", !!sid && n.dataset.id === sid));
-  document.querySelectorAll(".side-item.mem").forEach((n) => n.classList.toggle("active", cur()?.type === "memory" && cur().mem === n.dataset.mem));
+function renderPane() {
+  const body = $("paneBody");
+  body.textContent = "";
+  const q = $("paneSearch").value.trim().toLowerCase();
+  const match = (t) => !q || String(t).toLowerCase().includes(q);
+  if (pane === "chats") {
+    paneActions([["plus", "New task (⌘T)", () => newTab()], ["refresh", "Refresh", () => refreshChats()]]);
+    const open = new Set([...tabs.values()].filter((t) => t.type === "chat" && t.info.sessionId).map((t) => t.info.sessionId));
+    const sid = cur()?.info?.sessionId;
+    const groups = new Map();
+    for (const c of allChats.filter((c) => match(c.title))) {
+      const g = groupLabel(c.updated);
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(c);
+    }
+    if (!groups.size) body.appendChild(el("div", "empty-pane", q ? "No matching chats." : "No chats in this folder yet."));
+    for (const [g, list] of groups)
+      section(body, `chats:${g}`, g, list.length, () => {
+        for (const c of list) {
+          const r = el("button", `row${c.id === sid ? " active" : ""}`);
+          r.append(icon("chat"), el("span", "t", c.title || "Untitled"));
+          if (c.kind === "gpt") r.append(el("span", "label ok", "GPT"));
+          if (open.has(c.id)) r.append(el("span", "rmeta", "open"));
+          r.title = c.title;
+          r.onclick = () => openChat(c);
+          body.appendChild(r);
+        }
+      });
+  } else if (pane === "docs") {
+    paneActions([["refresh", "Refresh", () => refreshDocs()]]);
+    const list = docs.filter((d) => match(d.rel));
+    const touched = list.filter((d) => d.touched);
+    const prds = list.filter((d) => d.prd && !d.touched);
+    const rest = list.filter((d) => !d.prd && !d.touched);
+    const docRow = (d) => {
+      const r = el("button", `row${cur()?.type === "doc" && cur().path === d.path ? " active" : ""}`);
+      const st = el("span", "stack");
+      st.append(el("span", "t", d.name), el("span", "sub", d.rel));
+      r.append(icon("doc"), st);
+      if (d.prd) r.append(el("span", "label accent", "PRD"));
+      if (d.touched) r.append(el("span", "rmeta", d.touched));
+      r.title = d.path;
+      r.onclick = () => openDoc(d.path);
+      body.appendChild(r);
+    };
+    if (!list.length) body.appendChild(el("div", "empty-pane", q ? "No matching documents." : "No documents (.md, .txt, .pdf, .docx) in this folder."));
+    if (touched.length) section(body, "docs:touched", "Opened by agents", touched.length, () => touched.forEach(docRow));
+    if (prds.length) section(body, "docs:prd", "PRDs", prds.length, () => prds.forEach(docRow));
+    if (rest.length) section(body, "docs:all", "Documents", rest.length, () => rest.forEach(docRow));
+  } else if (pane === "memory") {
+    paneActions([["refresh", "Check again", () => refreshMemory()]]);
+    for (const [key, name, sub] of [["claudeMem", "claude-mem", "Session memory"], ["hindsight", "Hindsight", "Long-term memory"]]) {
+      const st = memStatus?.[key];
+      const r = el("button", `row${cur()?.type === "memory" && cur().mem === key ? " active" : ""}`);
+      const stack = el("span", "stack");
+      stack.append(el("span", "t", name), el("span", "sub", st?.up ? st.url : `${sub} · not running`));
+      r.append(el("span", `dot ${st?.up ? "ok" : ""}`), stack);
+      r.onclick = () => openMemory(key);
+      body.appendChild(r);
+    }
+  } else if (pane === "connections") {
+    paneActions([["refresh", "Check again", () => refreshConnections()], ["plus", "Add a server", () => showConnections(true)]]);
+    const apps = accountRows();
+    section(body, "conn:apps", "Accounts & apps", apps.length, () => {
+      for (const a of apps) {
+        const r = el("div", "row");
+        const st = el("span", "stack");
+        st.append(el("span", "t", a.name), el("span", "sub", a.sub));
+        r.append(el("span", `dot ${a.ok ? "ok" : "bad"}`), st);
+        body.appendChild(r);
+      }
+    });
+    const list = connState.filter((c) => match(c.name));
+    section(body, "conn:mcp", "MCP servers", list.length, () => {
+      if (!connState.length) body.appendChild(el("div", "empty-pane", "Checking servers…"));
+      for (const c of list) {
+        const r = el("button", "row");
+        const st = el("span", "stack");
+        st.append(el("span", "t", c.name), el("span", "sub", c.status === "connected" ? `${c.tools} tools · ${c.source}` : c.status === "needs-auth" ? "needs sign-in" : c.status === "disabled" ? "off" : c.error || c.status));
+        r.append(el("span", `dot ${c.status}`), st);
+        r.title = c.error || c.target || c.name;
+        r.onclick = () => showConnections();
+        body.appendChild(r);
+      }
+    });
+    const foot = el("div", "pane-foot");
+    const b = el("button", "btn sm", "Manage servers…");
+    b.onclick = () => showConnections();
+    foot.appendChild(b);
+    body.appendChild(foot);
+  } else if (pane === "team") {
+    paneActions([["plus", "New subagent", () => showSubagents()]]);
+    const mine = agents.filter((a) => a.custom && match(a.name));
+    const builtin = agents.filter((a) => !a.custom && match(a.name));
+    const agentRow = (a) => {
+      const r = el("button", "row");
+      const st = el("span", "stack");
+      st.append(el("span", "t", a.name), el("span", "sub", a.runsOn ? shortModel(a.runsOn.split(" ")[0]) : shortModel(a.model)));
+      r.append(icon("people"), st);
+      r.title = a.description;
+      r.onclick = () => showAgents();
+      body.appendChild(r);
+    };
+    section(body, "team:mine", "Your subagents", mine.length, () => (mine.length ? mine.forEach(agentRow) : body.appendChild(el("div", "empty-pane", "None yet. Use + or /subagents."))));
+    section(body, "team:builtin", "Built-in", builtin.length, () => builtin.forEach(agentRow));
+    const foot = el("div", "pane-foot");
+    const b = el("button", "btn sm", "Create subagents…");
+    b.onclick = () => showSubagents();
+    foot.appendChild(b);
+    body.appendChild(foot);
+  }
 }
+
+// ── data refreshers ────────────────────────────────────────────────────────
 async function refreshChats() {
   allChats = await api.chats();
-  renderChats();
+  if (pane === "chats") renderPane();
 }
+async function refreshDocs() {
+  docs = await api.docs();
+  if (pane === "docs") renderPane();
+}
+async function refreshMemory() {
+  memStatus = await api.memoryStatus();
+  if (pane === "memory" || pane === "connections") renderPane();
+}
+async function refreshConnections(reconnect) {
+  connState = await api.connections(reconnect);
+  const bad = connState.filter((c) => ["failed", "needs-auth"].includes(c.status)).length;
+  $("connBadge").hidden = !bad;
+  $("connBadge").textContent = bad > 99 ? "99+" : String(bad);
+  if (pane === "connections") renderPane();
+  return connState;
+}
+async function refreshUsage() {
+  usageState = await api.usage();
+  renderStatus();
+}
+async function refreshAgents() {
+  agents = await api.agents();
+  if (pane === "team") renderPane();
+}
+
+// ── chats ──────────────────────────────────────────────────────────────────
 async function openChat(c) {
-  // Already open? Focus that tab.
   for (const [id, t] of tabs) if (t.type === "chat" && t.info.sessionId === c.id) return activate(id);
   const s = cur();
-  const reuse = s && s.type === "chat" && !s.info.sessionId && !s.info.busy;
-  if (reuse) {
+  if (s && s.type === "chat" && !s.info.sessionId && !s.info.busy) {
     try {
       const history = await api.openChat(s.id, c.id, c.title);
       s.loaded = true;
       renderHistory(s, history);
-      markActiveChat();
+      s.context = null;
+      api.context(s.id).then((x) => x && ((s.context = x), renderStatus()));
+      renderPane();
     } catch (err) {
       addNote(s, err.message, "error");
     }
@@ -789,68 +870,139 @@ async function openChat(c) {
 }
 async function newChatInTab() {
   const s = cur();
-  if (!s || s.type !== "chat") return newTab();
-  if (s.info.busy) return newTab();
+  if (!s || s.type !== "chat" || s.info.busy) return newTab();
   await api.newChat(s.id);
   clearView(s);
   input.focus();
 }
 
-// ── sidebar: memory (claude-mem, Hindsight) ────────────────────────────────
+// ── documents ──────────────────────────────────────────────────────────────
+function renderSummary(box, sum, prd) {
+  box.textContent = "";
+  const top = el("div", "s-top");
+  top.append(icon("list"), el("span", "", prd ? "PRD summary" : "Summary"), el("span", "meta-r", `${shortModel(sum.model)} · ${fmtTime(sum.at)}`));
+  const b = el("div", "s-body");
+  b.append(el("p", "tldr", sum.tldr));
+  const list = (title, items) => {
+    if (!items?.length) return;
+    b.append(el("h4", "", title));
+    const ul = el("ul");
+    for (const it of items) ul.append(el("li", "", it));
+    b.append(ul);
+  };
+  list("Main points", sum.points);
+  list(prd ? "Requirements" : "Must-haves & constraints", sum.requirements);
+  list("Open questions", sum.open_questions);
+  box.append(top, b);
+  box.hidden = false;
+}
+async function openDoc(path) {
+  for (const [id, t] of tabs) if (t.type === "doc" && t.path === path) return activate(id);
+  let d;
+  try {
+    d = await api.readDoc(path);
+  } catch (err) {
+    const s = cur();
+    if (s?.type === "chat") addNote(s, err.message, "error");
+    return;
+  }
+  const name = path.split(/[\\/]/).pop();
+  const s = addLocalTab("doc", name, { path: d.path });
+  const wrap = el("div", "doc-wrap");
+  const head = el("div", "doc-head");
+  head.append(el("span", "path", d.path));
+  if (d.prd) head.append(el("span", "label accent", "PRD"));
+  const sumBtn = el("button", "btn primary sm", d.prd ? "Summarize PRD" : "Summarize");
+  const askBtn = el("button", "btn sm", "Ask about it");
+  const extBtn = el("button", "btn sm", "Open externally");
+  head.append(sumBtn, askBtn, extBtn);
+  const scroll = el("div", "doc-scroll");
+  const inner = el("div", "doc-inner");
+  const sumBox = el("div", "summary");
+  sumBox.hidden = true;
+  inner.appendChild(sumBox);
+  if (d.text == null) inner.appendChild(el("p", "doc-binary", `${d.ext.slice(1).toUpperCase()} file (${fmtTokens(d.size)}B). It can't be shown here, but Summarize can read it.`));
+  else if ([".md", ".mdx", ".markdown"].includes(d.ext)) {
+    const b = el("div", "bubble");
+    b.innerHTML = md(d.text);
+    inner.appendChild(b);
+  } else inner.appendChild(el("div", "doc-text", d.text));
+  scroll.appendChild(inner);
+  wrap.append(head, scroll);
+  s.view.appendChild(wrap);
+  if (d.summary) {
+    renderSummary(sumBox, d.summary, d.prd);
+    sumBtn.textContent = "Summarize again";
+  }
+  sumBtn.onclick = async () => {
+    sumBtn.disabled = true;
+    const old = sumBtn.textContent;
+    sumBtn.textContent = "Summarizing…";
+    sumBox.hidden = false;
+    sumBox.textContent = "";
+    const loading = el("div", "s-top");
+    loading.append(el("span", "spin"), el("span", "", `${shortModel(info.models.triage)} is reading ${name}…`));
+    sumBox.appendChild(loading);
+    try {
+      renderSummary(sumBox, await api.summarizeDoc(d.path, !!d.summary || old.includes("again")), d.prd);
+      sumBtn.textContent = "Summarize again";
+    } catch (err) {
+      sumBox.textContent = err.message;
+      sumBtn.textContent = old;
+    } finally {
+      sumBtn.disabled = false;
+    }
+  };
+  askBtn.onclick = async () => {
+    const t = await newTab();
+    input.value = `Read ${d.path} and `;
+    autoSize();
+    input.focus();
+    return t;
+  };
+  extBtn.onclick = () => api.openDocExternal(d.path);
+  activate(s.id);
+  renderPane();
+}
+
+// ── memory viewers ─────────────────────────────────────────────────────────
 const MEM = {
-  claudeMem: { title: "claude-mem", start: ["claude-mem runs inside Claude Code. Open Claude Code once in any project so its worker starts.", "Its viewer usually lives at localhost:37777 (yours showed 37701)."] },
+  claudeMem: { title: "claude-mem", start: ["claude-mem runs inside Claude Code. Open Claude Code once in any project so its worker starts.", "Its viewer is usually at localhost:37777 (yours showed 37701)."] },
   hindsight: { title: "Hindsight", start: ["Start it from the agent-harness folder:", "docker compose up -d hindsight", "The web UI runs on localhost:9999 and the API on 8888."] },
 };
-let memStatus = null;
-async function refreshMemory() {
-  memStatus = await api.memoryStatus();
-  for (const [key, btn] of [["claudeMem", $("memClaudeMem")], ["hindsight", $("memHindsight")]]) {
-    const st = memStatus[key];
-    btn.querySelector("[data-status]").className = `dot ${st.up ? "ok" : ""}`;
-    btn.title = st.up ? `${MEM[key].title} at ${st.url}` : `${MEM[key].title} isn't running`;
-  }
-}
 async function openMemory(key) {
   for (const [id, t] of tabs) if (t.type === "memory" && t.mem === key) return activate(id);
   await refreshMemory();
   const st = memStatus[key];
-  const id = `m${++memSeq}`;
-  const view = el("section", "view mem-view");
-  view.hidden = true;
-  const s = { id, type: "memory", mem: key, title: MEM[key].title, view };
+  const s = addLocalTab("memory", MEM[key].title, { mem: key });
   if (st.up) {
-    const wrap = el("div", "mem-wrap");
-    const head = el("div", "mem-head");
-    const reload = el("button", "ghost", "Reload");
-    const ext = el("button", "ghost", "Open in browser");
-    head.append(el("span", "url", st.url), reload, ext);
+    const wrap = el("div", "doc-wrap");
+    const head = el("div", "doc-head");
+    const reload = el("button", "btn sm", "Reload");
+    const ext = el("button", "btn sm", "Open in browser");
+    head.append(el("span", "path", st.url), reload, ext);
     const frame = el("iframe", "mem-frame");
     frame.src = st.url;
     reload.onclick = () => (frame.src = st.url);
     ext.onclick = () => window.open(st.url, "_blank");
     wrap.append(head, frame);
-    view.appendChild(wrap);
+    s.view.appendChild(wrap);
   } else {
     const off = el("div", "mem-off");
     off.append(el("h2", "", `${MEM[key].title} isn't running`));
     for (const line of MEM[key].start) off.appendChild(line.startsWith("docker") ? Object.assign(el("pre"), { textContent: line }) : el("p", "", line));
-    const retry = el("button", "primary", "Check again");
+    const retry = el("button", "btn primary", "Check again");
     retry.onclick = async () => {
-      await closeTab(id);
+      await closeTab(s.id);
       openMemory(key);
     };
     off.appendChild(retry);
-    view.appendChild(off);
+    s.view.appendChild(off);
   }
-  viewsEl.appendChild(view);
-  tabs.set(id, s);
-  order.push(id);
-  activate(id);
+  activate(s.id);
 }
-$("memClaudeMem").onclick = () => openMemory("claudeMem");
-$("memHindsight").onclick = () => openMemory("hindsight");
 
-// ── modals ─────────────────────────────────────────────────────────────────
+// ── dialogs ────────────────────────────────────────────────────────────────
 function modal(title, body) {
   $("modalTitle").textContent = title;
   const b = $("modalBody");
@@ -861,10 +1013,173 @@ function modal(title, body) {
 $("modalClose").onclick = () => ($("modal").hidden = true);
 $("modal").onclick = (e) => e.target.id === "modal" && ($("modal").hidden = true);
 
+const CTX_COLORS = {
+  system_prompt: "--ctx-system",
+  system_tools: "--ctx-tools",
+  mcp_tools: "--ctx-mcp",
+  mcp_instructions: "--ctx-mcp",
+  custom_agents: "--ctx-agents",
+  memory_files: "--ctx-memory",
+  skills: "--ctx-skills",
+  messages: "--ctx-messages",
+  autocompact_buffer: "--ctx-buffer",
+  compact_buffer: "--ctx-buffer",
+};
+const ctxColor = (id) => (CTX_COLORS[id] ? `var(${CTX_COLORS[id]})` : "transparent");
+
+/** /context: the same square grid Claude Code shows, by category. */
+async function showContext() {
+  const s = cur();
+  if (s?.type !== "chat") return;
+  let ctx = s.context;
+  if (!ctx && s.info.sessionId) ctx = s.context = await api.context(s.id);
+  const box = el("div");
+  if (!ctx) {
+    box.appendChild(el("p", "muted", s.info.kind === "gpt" ? "Context details aren't available for GPT chats." : "Send a message first; the grid fills in after the first reply."));
+    return modal("Context", box);
+  }
+  const wrap = el("div", "ctx");
+  const grid = el("div", "ctx-grid");
+  // Same squares and order as Claude Code; laid out 20 across when the window is large.
+  const cells = ctx.grid.flat();
+  const cols = cells.length > 100 ? 20 : 10;
+  const size = cols > 10 ? 15 : 18;
+  grid.style.gridTemplateColumns = `repeat(${cols}, ${size}px)`;
+  grid.style.gridAutoRows = `${size}px`;
+  for (const c of cells) {
+      const i = el("i");
+      if (c.fill) {
+        const b = el("b");
+        b.style.height = `${Math.max(15, Math.round(c.fill * 100))}%`;
+        b.style.top = "0";
+        b.style.background = ctxColor(c.id);
+        i.appendChild(b);
+      }
+      i.title = c.id.replace(/_/g, " ");
+      grid.appendChild(i);
+    }
+  const right = el("div");
+  const total = el("div", "ctx-total");
+  total.append(el("strong", "", `${ctx.percentage}%`), document.createTextNode(`${fmtTokens(ctx.total)} of ${fmtTokens(ctx.max)} tokens · ${shortModel(ctx.model)}`));
+  const legend = el("div", "ctx-legend");
+  for (const c of ctx.categories.filter((c) => c.kind !== "deferred")) {
+    const lg = el("div", "lg");
+    const sw = el("span", "sw");
+    sw.style.background = c.kind === "free" ? "transparent" : ctxColor(c.id);
+    if (c.kind === "free") sw.style.border = "1px solid var(--border)";
+    lg.append(sw, el("span", "", c.name), el("span", "num", `${fmtTokens(c.tokens)} · ${((c.tokens / ctx.max) * 100).toFixed(1)}%`));
+    legend.appendChild(lg);
+  }
+  const deferred = ctx.categories.filter((c) => c.kind === "deferred");
+  right.append(total, legend);
+  if (deferred.length) right.append(el("p", "muted", `Not loaded until needed: ${deferred.map((c) => `${c.name} ${fmtTokens(c.tokens)}`).join(", ")}.`));
+  wrap.append(grid, right);
+  box.appendChild(wrap);
+  modal("Context window", box);
+}
+
+async function showUsage() {
+  await refreshUsage();
+  const u = usageState;
+  const box = el("div");
+  box.appendChild(el("h4", "", "Claude plan"));
+  if (!u.usage?.windows?.length) box.appendChild(el("p", "muted", "No usage reported yet. It shows up after your first message."));
+  for (const w of u.usage?.windows ?? []) {
+    const pct = w.utilization == null ? null : Math.round(w.utilization * 100);
+    const m = el("div", `meter${pct >= 100 || w.status === "rejected" ? " full" : pct >= 80 ? " warn" : ""}`);
+    m.append(el("span", "", w.label), el("span", "", pct == null ? "?" : `${pct}%`));
+    const bar = el("div", "bar");
+    const fill = el("i");
+    fill.style.width = `${Math.min(100, pct ?? 0)}%`;
+    bar.appendChild(fill);
+    m.appendChild(bar);
+    if (w.resetsAt) m.appendChild(el("span", "when", `Resets ${fmtTime(w.resetsAt)}`));
+    box.appendChild(m);
+  }
+  box.appendChild(el("h4", "", "ChatGPT plan"));
+  box.appendChild(el("p", "muted", u.codex.ok ? `Signed in · ${info.models.gpt.map(shortModel).join(", ")}` : u.codex.detail));
+  const c = el("div", `callout${u.limited ? " bad" : ""}`);
+  c.textContent = u.limited
+    ? `Claude is at its limit until ${fmtTime(u.usage?.resetsAt)}. Tasks continue on ${shortModel(u.gpt)}.`
+    : `If Claude runs out, the task that hit the limit continues on ${shortModel(u.gpt)} with your ChatGPT plan, and new tabs start there until Claude resets.`;
+  box.appendChild(c);
+  modal("Usage", box);
+}
+
+function accountRows() {
+  return [
+    { name: "Claude plan", ok: !!info?.auth.plan || info?.subscriptionOnly === false, sub: info?.auth.plan ? `Signed in · ${info.auth.plan}` : info?.subscriptionOnly === false ? "API billing allowed" : "Not signed in" },
+    { name: "ChatGPT plan", ok: !!info?.codex.ok, sub: info?.codex.detail ?? "" },
+    { name: "claude-mem", ok: !!memStatus?.claudeMem.up, sub: memStatus?.claudeMem.up ? memStatus.claudeMem.url : "Not running" },
+    { name: "Hindsight", ok: !!memStatus?.hindsight.up, sub: memStatus?.hindsight.up ? memStatus.hindsight.url : "Not running" },
+  ];
+}
+async function showConnections(focusAdd = false) {
+  const box = el("div");
+  const render = async (reconnect) => {
+    box.textContent = "";
+    box.appendChild(el("p", "muted", reconnect ? `Reconnecting ${reconnect}…` : "Checking servers…"));
+    const list = await refreshConnections(reconnect);
+    box.textContent = "";
+    box.appendChild(el("h4", "", "Accounts & apps"));
+    for (const a of accountRows()) {
+      const r = el("div", "list-row");
+      r.append(el("span", `dot ${a.ok ? "ok" : "bad"}`), el("div", "name", a.name), el("div", "sub", a.sub));
+      box.appendChild(r);
+    }
+    box.appendChild(el("h4", "", `MCP servers (${list.length})`));
+    for (const c of list) {
+      const r = el("div", "list-row");
+      const name = el("div", "name", c.name);
+      name.appendChild(el("span", "label", c.source));
+      const detail = c.status === "connected" ? `${c.tools} tool${c.tools === 1 ? "" : "s"}${c.target ? ` · ${c.target}` : ""}` : c.status === "needs-auth" ? "Needs sign-in: open Claude Code (claude), run /mcp, sign in" : c.status === "disabled" ? "Turned off" : c.error || c.target || c.status;
+      const sub = el("div", "sub", detail);
+      sub.title = detail;
+      const acts = el("div", "acts");
+      if (["failed", "needs-auth", "pending"].includes(c.status)) {
+        const rc = el("button", "btn sm", "Reconnect");
+        rc.onclick = () => render(c.name);
+        acts.appendChild(rc);
+      }
+      const tg = el("button", "btn sm", c.enabled ? "Turn off" : "Turn on");
+      tg.onclick = async () => (await api.mcpToggle(c.name, !c.enabled), render());
+      acts.appendChild(tg);
+      if (c.removable) {
+        const rm = el("button", "btn sm danger", "Remove");
+        rm.onclick = async () => (await api.mcpRemove(c.name), render());
+        acts.appendChild(rm);
+      }
+      r.append(el("span", `dot ${c.status}`), name, sub, acts);
+      box.appendChild(r);
+    }
+    box.appendChild(el("h4", "", "Add an MCP server"));
+    const form = el("div", "form-grid");
+    const nm = el("input", "input");
+    nm.placeholder = "Name, e.g. notion";
+    const spec = el("input", "input");
+    spec.placeholder = "URL (https://…) or command (npx -y some-mcp-server)";
+    const add = el("button", "btn primary", "Add");
+    add.onclick = async () => {
+      try {
+        await api.mcpAdd(nm.value, spec.value);
+        render();
+      } catch {
+        add.textContent = "Check name & address";
+      }
+    };
+    form.append(nm, spec, add);
+    box.appendChild(form);
+    box.appendChild(el("p", "muted", "Saved in mcp-servers.json; available to every tab from the next message. Servers from your Claude Code setup and claude.ai connectors appear here automatically."));
+    if (focusAdd) nm.focus();
+  };
+  modal("MCP servers & apps", box);
+  render();
+}
+
 async function showDesign(q) {
   const links = await api.design(q);
   const box = el("div");
-  if (!links.length) box.appendChild(el("p", "", "No matches."));
+  if (!links.length) box.appendChild(el("p", "muted", "No matches."));
   for (const l of links) {
     const a = el("a", "link-row");
     a.href = l.url;
@@ -872,81 +1187,63 @@ async function showDesign(q) {
     a.append(el("strong", "", l.title), el("small", "", `${l.notes ? l.notes + " · " : ""}${l.section ?? ""}`));
     box.appendChild(a);
   }
-  const open = el("button", "ghost", "Edit UI-LINKS.md");
+  const open = el("button", "btn sm", "Edit UI-LINKS.md");
+  open.style.marginTop = "10px";
   open.onclick = () => api.openDesignLibrary();
   box.appendChild(open);
   modal(q ? `UI links: ${q}` : "UI links", box);
 }
 
-function agentRow(a, onRemove) {
+function agentRowEl(a, onRemove) {
   const r = el("div", "agent-row");
-  const chip = el("span", "agent-chip");
-  chip.style.setProperty("--c", agentColor(a.name));
-  chip.append(el("span", "", a.name), el("span", "model", a.runsOn ? shortModel(a.runsOn.split(" ")[0]) : shortModel(a.model || "")));
+  const name = el("div", "an", a.name);
+  name.append(el("span", "am", a.runsOn ? shortModel(a.runsOn.split(" ")[0]) : shortModel(a.model || "")));
   const p = el("p", "", a.description);
-  if (a.custom) p.prepend(el("span", "tag-mine", "yours"), document.createTextNode(" "));
-  r.append(chip, p);
+  if (a.custom) p.prepend(el("span", "label accent", "yours"), document.createTextNode(" "));
+  r.append(name, p);
   if (onRemove) {
-    const x = el("button", "ghost", "Remove");
+    const x = el("button", "btn sm danger", "Remove");
     x.onclick = () => onRemove(a.name);
     r.appendChild(x);
   } else r.appendChild(el("span"));
   return r;
 }
-
 async function showAgents() {
+  await refreshAgents();
   const box = el("div");
-  for (const a of await api.agents()) box.appendChild(agentRow(a));
+  for (const a of agents) box.appendChild(agentRowEl(a));
   modal("The team", box);
 }
-
-/** /subagents: list, design with the advisor, review, save. */
 async function showSubagents(prefill = "", autoRun = false) {
   const box = el("div");
-  const team = el("div");
-  const renderTeam = async () => {
-    team.textContent = "";
-    const agents = await api.agents();
-    $("teamCount").textContent = `${agents.length} agents · ${agents.filter((a) => a.custom).length} yours`;
-    for (const a of agents)
-      team.appendChild(
-        agentRow(
-          a,
-          a.custom
-            ? async (name) => {
-                await api.removeSubagent(name);
-                renderTeam();
-              }
-            : null,
-        ),
-      );
-  };
-  await renderTeam();
-
   const form = el("div", "sub-form");
-  form.style.marginTop = "0";
   const ta = el("textarea");
-  ta.placeholder = "Describe the subagents you want, e.g. \"an SEO writer on Sonnet and a GPT-6 Astra copy critic\".\nLeave it empty and the Fable advisor will look at this project and suggest some.";
+  ta.placeholder = 'Describe the subagents you want, e.g. "an SEO writer on Sonnet and a GPT-6 Astra copy critic". Leave empty and the Fable advisor will suggest some for this project.';
   ta.value = prefill;
-  const go = el("button", "primary", "Design with the advisor");
+  const go = el("button", "btn primary", "Design with the advisor");
   const status = el("span", "muted", "");
-  const row = el("div", "row");
-  const file = el("button", "ghost", "Edit subagents.yaml");
+  const file = el("button", "btn", "Edit subagents.yaml");
   file.onclick = () => api.openSubagentsFile();
-  row.append(go, status, file);
+  const row = el("div", "row-actions");
+  row.append(go, file, status);
   const results = el("div");
   form.append(ta, row, results);
-
+  const team = el("div");
+  const renderTeam = async () => {
+    await refreshAgents();
+    team.textContent = "";
+    for (const a of agents) team.appendChild(agentRowEl(a, a.custom ? async (n) => (await api.removeSubagent(n), renderTeam()) : null));
+  };
   go.onclick = async () => {
     go.disabled = true;
     results.textContent = "";
-    status.textContent = ta.value.trim() ? "The advisor is designing your subagents…" : "The advisor is looking at your project…";
-    status.className = "muted hint working";
+    status.textContent = "";
+    status.prepend(el("span", "spin"));
+    status.append(document.createTextNode(ta.value.trim() ? " The advisor is designing your subagents…" : " The advisor is looking at your project…"));
     try {
       const { summary, subagents } = await api.designSubagents(ta.value);
       status.textContent = "";
-      status.className = "muted";
-      if (summary) results.appendChild(el("p", "", summary));
+      if (summary) results.appendChild(el("p", "muted", summary));
       const picks = [];
       for (const a of subagents) {
         const card = el("div", "proposal");
@@ -955,61 +1252,57 @@ async function showSubagents(prefill = "", autoRun = false) {
         cb.type = "checkbox";
         cb.checked = true;
         picks.push([cb, a]);
-        const chip = el("span", "agent-chip");
-        chip.style.setProperty("--c", agentColor(a.name));
-        chip.append(el("span", "", a.name), el("span", "model", shortModel(a.model)));
-        label.append(cb, chip);
+        label.append(cb, el("span", "", a.name), el("span", "label", shortModel(a.model)));
         const det = el("details");
         det.append(el("summary", "", "System prompt"), Object.assign(el("pre"), { textContent: a.prompt }));
         card.append(label, el("p", "", a.description), det);
         results.appendChild(card);
       }
-      const save = el("button", "primary", "Add selected to the team");
-      save.style.marginTop = "12px";
+      const save = el("button", "btn primary", "Add selected to the team");
+      save.style.marginTop = "10px";
       save.onclick = async () => {
         const chosen = picks.filter(([cb]) => cb.checked).map(([, a]) => a);
         if (!chosen.length) return;
         await api.saveSubagents(chosen);
         results.textContent = "";
-        results.appendChild(el("p", "", `Added ${chosen.map((a) => a.name).join(", ")}. The orchestrator can use them from your next message.`));
+        results.appendChild(el("p", "muted", `Added ${chosen.map((a) => a.name).join(", ")}. The orchestrator can use them from your next message.`));
         renderTeam();
       };
       results.appendChild(save);
       results.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
       status.textContent = err.message;
-      status.className = "muted";
     } finally {
       go.disabled = false;
     }
   };
-
-  const teamLabel = el("div", "chat-group", "Current team");
-  box.append(form, teamLabel, team);
+  box.append(form, el("h4", "", "Current team"), team);
   modal("Subagents", box);
+  renderTeam();
   if (autoRun) go.click();
 }
-$("teamBtn").onclick = () => showSubagents();
 
 function showStatus() {
   const dl = el("dl", "kv");
   const row = (k, v) => dl.append(el("dt", "", k), el("dd", "", v));
-  const s = cur();
   row("Billing", info.subscriptionOnly ? "Subscriptions only" : "API keys allowed (HARNESS_ALLOW_API=1)");
   row("Claude plan", info.auth.plan || info.auth.error || "unknown");
   row("ChatGPT (Codex)", info.codex.detail);
-  if (s?.type === "chat") row("This tab", `${shortModel(s.info.model)}${s.info.busy ? " · working" : ""}`);
   for (const [k, v] of Object.entries(info.models)) row(k, Array.isArray(v) ? v.join(", ") : v);
   row("Folder", info.workspace);
   row("Plugins", info.plugins.join(", ") || "none (run npm run setup)");
-  row("Not connected", info.mcpSkipped.join("; ") || "all configured");
   row("UI links", `${info.designCount} links`);
-  row("Terminal link", "Run npm start in a terminal while this app is open to join the same tabs");
+  row("Terminal link", "Run npm start while this app is open to share its tabs");
   const box = el("div");
   box.appendChild(dl);
-  const cfg = el("button", "ghost", "Open harness.config.yaml");
+  const r = el("div", "row-actions");
+  r.style.marginTop = "12px";
+  const cfg = el("button", "btn", "Open harness.config.yaml");
   cfg.onclick = () => api.openConfig();
-  box.appendChild(cfg);
+  const help = el("button", "btn", "All commands");
+  help.onclick = () => showHelp();
+  r.append(cfg, help);
+  box.appendChild(r);
   modal("Status", box);
 }
 function showHelp() {
@@ -1018,13 +1311,13 @@ function showHelp() {
   for (const c of COMMANDS) {
     if (c.group !== group) {
       group = c.group;
-      box.appendChild(el("div", "chat-group", group));
+      box.appendChild(el("h4", "", group));
     }
     const r = el("div", "slash-item");
     r.append(el("code", "", c.name + (c.args ? ` ${c.args}` : "")), el("span", "", c.description));
     box.appendChild(r);
   }
-  box.appendChild(el("p", "", "Shortcuts: ⌘T new tab · ⌘W close tab · ⌘1–9 switch tabs · ⌘K search chats · ⌘N new chat in this tab"));
+  box.appendChild(el("p", "muted", "⌘T new tab · ⌘W close · ⌘1–9 switch · ⌘K search chats · ⌘N new chat · ⌘Enter change the running task"));
   modal("Commands", box);
 }
 
@@ -1035,7 +1328,7 @@ function openBtw() {
 }
 async function btw(q) {
   const s = cur();
-  if (!s || s.type !== "chat") return;
+  if (s?.type !== "chat") return;
   openBtw();
   const item = el("div");
   const a = el("div", "btw-a loading", "Thinking…");
@@ -1047,7 +1340,6 @@ async function btw(q) {
   } catch (err) {
     a.textContent = err.message;
   }
-  $("btwList").scrollTop = $("btwList").scrollHeight;
 }
 $("btwBtn").onclick = openBtw;
 $("btwClose").onclick = () => ($("btwPanel").hidden = true);
@@ -1059,7 +1351,7 @@ $("btwForm").onsubmit = (e) => {
   btw(q);
 };
 
-// ── fork, rename, workspace ────────────────────────────────────────────────
+// ── fork, rename, folder ───────────────────────────────────────────────────
 async function fork(title) {
   const s = cur();
   try {
@@ -1072,7 +1364,7 @@ async function fork(title) {
 $("forkBtn").onclick = () => fork();
 $("chatTitle").ondblclick = () => {
   const s = cur();
-  if (!s || s.type !== "chat" || !s.info.sessionId) return;
+  if (s?.type !== "chat" || !s.info.sessionId) return;
   const t = $("chatTitle");
   t.contentEditable = "true";
   t.focus();
@@ -1089,21 +1381,22 @@ $("chatTitle").ondblclick = () => {
   };
   t.onblur = () => done(true);
 };
-$("workspaceBtn").onclick = async () => {
+$("sbFolder").onclick = async () => {
   const ws = await api.pickWorkspace();
   if (!ws) return;
   info.workspace = ws;
-  $("workspaceName").textContent = ws.split(/[\\/]/).pop() || ws;
-  $("workspaceBtn").title = ws;
   for (const s of tabs.values()) if (s.type === "chat" && !s.info.busy) clearView(s);
+  renderStatus();
   refreshChats();
+  refreshDocs();
 };
 
-// ── composer & slash commands ──────────────────────────────────────────────
+// ── composer & commands ────────────────────────────────────────────────────
 function autoSize() {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, 220) + "px";
   $("sendBtn").disabled = !input.value.trim();
+  $("changeBtn").disabled = !input.value.trim();
 }
 function slashMatches() {
   const v = input.value.toLowerCase();
@@ -1124,16 +1417,13 @@ function renderSlash() {
   items.forEach((c, i) => {
     if (c.group !== group) {
       group = c.group;
-      menu.appendChild(el("div", "chat-group", group));
+      menu.appendChild(el("div", "slash-group", group));
     }
     const r = el("div", `slash-item${i === slashIndex ? " sel" : ""}`);
     r.setAttribute("role", "option");
     r.title = `${c.name}${c.args ? ` ${c.args}` : ""}\n${c.description}`;
     r.append(el("code", "", c.name), el("span", "", (c.args ? `${c.args} · ` : "") + c.description));
-    r.onmousedown = (e) => {
-      e.preventDefault();
-      pickSlash(c.name);
-    };
+    r.onmousedown = (e) => (e.preventDefault(), pickSlash(c.name));
     menu.appendChild(r);
   });
   menu.querySelector(".sel")?.scrollIntoView({ block: "nearest" });
@@ -1144,19 +1434,21 @@ function pickSlash(c) {
   autoSize();
   input.focus();
 }
-
-async function submit() {
+async function submit(mode = "send") {
   const text = input.value.trim();
   const s = cur();
-  if (!text || !s || s.type !== "chat") return;
+  if (!text || s?.type !== "chat") return;
   input.value = "";
   autoSize();
   $("slashMenu").hidden = true;
+  if (mode === "change") return api.change(s.id, text.replace(/^\/change\s*/, ""));
 
   const [rawCmd, ...rest] = text.split(/\s+/);
-  const cmd = { "/clear": "/new", "/quit": "/exit" }[rawCmd] || rawCmd;
+  const cmd = { "/clear": "/new", "/quit": "/exit", "/mcp": "/connections", "/apps": "/connections" }[rawCmd] || rawCmd;
   const arg = rest.join(" ");
   switch (cmd) {
+    case "/change":
+      return arg ? api.change(s.id, arg) : addNote(s, "Usage: /change <what to do differently>. While a task runs, it adjusts it at the next step without stopping.");
     case "/new":
       return newChatInTab();
     case "/exit":
@@ -1167,6 +1459,8 @@ async function submit() {
       return arg ? btw(arg) : openBtw();
     case "/stop":
       return api.stop(s.id);
+    case "/context":
+      return showContext();
     case "/design":
       return showDesign(arg);
     case "/agents":
@@ -1176,16 +1470,22 @@ async function submit() {
     case "/usage":
       return showUsage();
     case "/connections":
-    case "/mcp":
-    case "/apps":
       return showConnections();
     case "/status":
       return showStatus();
     case "/help":
       return showHelp();
+    case "/docs":
+      setPane("docs");
+      return arg && openDoc(arg);
+    case "/summarize": {
+      if (!arg) return setPane("docs");
+      await openDoc(arg);
+      return document.querySelector(".view:not([hidden]) .doc-head .btn.primary")?.click();
+    }
     case "/chats":
-      $("chatSearch").focus();
-      return refreshChats();
+      setPane("chats");
+      return $("paneSearch").focus();
     case "/resume": {
       await refreshChats();
       const target = /^\d+$/.test(arg) ? allChats[Number(arg) - 1] : allChats.find((c) => c.id === arg || c.id.startsWith(arg));
@@ -1208,7 +1508,6 @@ async function submit() {
   }
   api.send(s.id, text);
 }
-
 input.addEventListener("input", () => {
   autoSize();
   slashIndex = 0;
@@ -1228,45 +1527,36 @@ input.addEventListener("keydown", (e) => {
     }
     if (e.key === "Escape") return ($("slashMenu").hidden = true);
   }
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && cur()?.info?.busy) {
+    e.preventDefault();
+    return submit("change");
+  }
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     submit();
   }
 });
-$("sendBtn").onclick = submit;
+$("sendBtn").onclick = () => submit();
+$("changeBtn").onclick = () => submit("change");
 $("stopBtn").onclick = () => cur() && api.stop(cur().id);
-$("newTabBtn").onclick = () => newTab();
 $("tabAdd").onclick = () => newTab();
-$("chatSearch").oninput = renderChats;
 document.addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey;
   const k = e.key.toLowerCase();
   if (mod && k === "t") (e.preventDefault(), newTab());
   else if (mod && k === "w") (e.preventDefault(), active && closeTab(active));
   else if (mod && k === "n") (e.preventDefault(), newChatInTab());
-  else if (mod && k === "k") (e.preventDefault(), $("chatSearch").focus());
+  else if (mod && k === "k") (e.preventDefault(), setPane("chats"), $("paneSearch").focus());
   else if (mod && /^[1-9]$/.test(e.key)) (e.preventDefault(), order[Number(e.key) - 1] && activate(order[Number(e.key) - 1]));
   else if (e.key === "Escape") $("modal").hidden = true;
 });
-
-// busy state follows the active tab
-setInterval(() => cur()?.type === "chat" && setBusyUi(cur().info.busy), 500);
+setInterval(() => {
+  const s = cur();
+  if (s?.type === "chat") setBusyUi(s.info.busy);
+  renderStatus();
+}, 1000);
 
 // ── startup ────────────────────────────────────────────────────────────────
-function renderPlans() {
-  const p = $("plans");
-  p.textContent = "";
-  const line = (ok, label) => {
-    const r = el("div", "plan");
-    r.append(el("span", `dot ${ok}`), el("span", "", label));
-    p.appendChild(r);
-  };
-  if (info.subscriptionOnly) {
-    line(info.auth.plan ? "ok" : "bad", `Claude ${info.auth.plan ? info.auth.plan.replace(/^./, (c) => c.toUpperCase()) : "not signed in"}`);
-    line(info.codex.ok ? "ok" : "warn", info.codex.ok ? "ChatGPT · GPT models" : "ChatGPT not signed in");
-  } else line("warn", "API billing allowed");
-}
-
 async function start() {
   info = await api.init();
   COMMANDS = info.commands?.length ? info.commands : [{ name: "/help", description: "All commands", group: "Harness" }];
@@ -1275,17 +1565,21 @@ async function start() {
     $("blockerMsg").textContent = info.auth.error.split("\n")[0];
     $("blocker").hidden = false;
   }
-  $("workspaceName").textContent = info.workspace.split(/[\\/]/).pop() || info.workspace;
-  $("workspaceBtn").title = info.workspace;
   buildModelSelect();
-  renderPlans();
+  await refreshChats();
   for (const t of info.tabs) ensureChatTab(t);
   activate(info.tabs[info.tabs.length - 1].id);
-  await Promise.all([refreshChats(), refreshMemory(), refreshUsage()]);
-  void refreshConnections();
-  const agents = await api.agents();
-  $("teamCount").textContent = `${agents.length} agents · ${agents.filter((a) => a.custom).length} yours`;
+  await Promise.all([refreshDocs(), refreshMemory(), refreshUsage(), refreshAgents()]);
+  for (const s of tabs.values())
+    if (s.type === "chat" && s.empty) {
+      const fresh = welcome();
+      fresh.hidden = s.empty.hidden;
+      s.empty.replaceWith(fresh);
+      s.empty = fresh;
+    }
+  renderPane();
   autoSize();
+  void refreshConnections();
   setInterval(refreshMemory, 30000);
 }
 $("retryAuth").onclick = async () => {
