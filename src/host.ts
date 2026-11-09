@@ -1,4 +1,6 @@
 import { listSessions } from "@anthropic-ai/claude-agent-sdk";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import type { HarnessConfig } from "./config.js";
 import { Harness } from "./session.js";
 import { ChatEngine, expandShortcut, mentionNote, parseMentions, type ChatEvent, type ChatSummary, type Engine, type HistoryItem } from "./engine.js";
@@ -200,6 +202,31 @@ export class Host {
         for (const m of waiting) t.engine.send(m.text, m.source, m.prompt);
       }
     }
+  }
+
+  /** Write a hand-off summary (context.md) for this tab's chat now. Claude chats only. */
+  async handoff(tabId: string) {
+    const t = this.get(tabId);
+    if (!(t.engine instanceof ChatEngine)) throw new Error("Hand-off works on Claude chats. This tab runs on GPT.");
+    return t.engine.handoff(false);
+  }
+
+  /**
+   * Open a new tab (same window, model and folder) that starts from a hand-off
+   * summary: it goes in front of the first message you send there.
+   */
+  continueInNewChat(tabId: string, file: string): TabInfo {
+    const t = this.get(tabId);
+    const root = join(this.cfg.root, ".harness", "handoffs");
+    const path = resolve(file);
+    if (!path.startsWith(root + sep) || !existsSync(path)) throw new Error("That hand-off file isn't available any more.");
+    const summary = readFileSync(path, "utf8");
+    const info = this.createTab({ windowId: t.windowId, model: t.engine.model, cwd: t.harness.cwd, title: `${t.title} (continued)` });
+    const next = this.get(info.id);
+    next.engine.seed(
+      `[This chat continues an earlier one ("${t.title}") whose context window filled up. Its hand-off summary follows; treat it as what you already know, and carry on from it.]\n\n${summary}`,
+    );
+    return info;
   }
 
   change(tabId: string, text: string, source = "app") {

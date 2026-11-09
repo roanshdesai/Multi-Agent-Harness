@@ -100,6 +100,7 @@ Name a connected app with `@` anywhere in a message, for example `@pally find my
 
 | Command | What it does |
 |---|---|
+| `/handoff` | Writes a `context.md` summary of this chat and offers to continue in a new chat that starts from it. This also happens on its own when a chat's context passes 80% (`context.handoff_at` in `harness.config.yaml`). |
 | `/models` | Pick the model for each role, and which models the model picker offers. Saved to `harness.config.yaml`. |
 | `/fork [title]` | Copies this chat and opens the copy in a **new terminal window** (tmux, macOS Terminal or iTerm, Windows Terminal, or a Linux terminal). `--here` switches to the copy in place instead. |
 | `/btw <q>` | Asks a side question on a throwaway copy of the chat. Works while a turn is running and never changes the main chat. |

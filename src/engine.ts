@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   forkSession,
@@ -30,7 +30,9 @@ export type ChatEvent =
   | { type: "question-answered"; id: string; answers: Record<string, string> }
   | { type: "advisor"; status: "asked" | "answered" }
   | { type: "usage"; usage: UsageSnapshot }
-  | { type: "limit"; prompt: string; resetsAt: number | null };
+  | { type: "limit"; prompt: string; resetsAt: number | null }
+  /** The context is getting full: a hand-off summary (context.md) is being written / is ready for a new chat. */
+  | { type: "handoff"; status: "writing" | "ready" | "failed"; percent?: number; file?: string; text?: string; error?: string; auto?: boolean };
 
 export interface HistoryItem {
   role: "user" | "assistant" | "agent" | "tool";
@@ -80,7 +82,21 @@ export interface Engine {
   change(text: string, source?: string): void;
   /** Tokens in the context window, by category. */
   context(): Promise<ContextInfo | null>;
+  /** Carry context into this (new) chat: it goes in front of the next message. */
+  seed(context: string): void;
 }
+
+/** What the model is asked for when writing a hand-off summary. */
+export const HANDOFF_PROMPT = `(Hand-off request from the harness, not a new task. Do not use tools or change anything.)
+
+This chat's context window is getting full, so the work will continue in a fresh chat. Write the hand-off document that new chat will start from, as Markdown, titled "# Context". It must let someone with no access to this chat carry on without asking anything. Include, with headings:
+- Goal: what the user is trying to achieve, in their words where possible.
+- The user's rules and preferences stated in this chat.
+- Decisions made, and why.
+- Current state: what is done, what is in progress, exact file paths, branches, commands and results that matter.
+- Open problems and anything that failed, with the exact errors.
+- Next steps, in order.
+Be specific and complete; leave out chit-chat. Reply with the document only.`;
 
 /** How a /change correction is phrased to the model. */
 export const changeNote = (text: string) => `${CHANGE_PREFIX}${text}`;
@@ -272,6 +288,59 @@ export class ChatEngine implements Engine {
     return out;
   }
 
+  private pendingSeed = "";
+  /** Sessions already offered a hand-off, so the notice shows once per chat. */
+  private handoffOffered = new Set<string>();
+
+  seed(context: string) {
+    this.pendingSeed = context;
+  }
+
+  /**
+   * Write a hand-off summary of this chat (on a throwaway fork, so the chat
+   * itself is untouched), save it as context.md under .harness/handoffs, and
+   * tell the apps it's ready to continue in a new chat.
+   */
+  async handoff(auto = false): Promise<{ file: string; text: string } | null> {
+    if (!this.sessionId) {
+      this.emit({ type: "handoff", status: "failed", error: "Nothing to hand off yet; send a message first.", auto });
+      return null;
+    }
+    const sid = this.sessionId;
+    const percent = this.lastContext?.percentage;
+    this.emit({ type: "handoff", status: "writing", percent, auto });
+    try {
+      const r = await this.harness.run(HANDOFF_PROMPT, {
+        persistSession: false,
+        maxTurns: 2,
+        disallowedTools: ["Write", "Edit", "NotebookEdit", "Bash", "Agent", "Task", "WebFetch", "WebSearch"],
+        resume: sid,
+        forkSession: true,
+      });
+      const text = r.text.trim();
+      if (r.isError || !text) throw new Error(r.text || "The model returned nothing.");
+      const dir = join(this.harness.cfg.root, ".harness", "handoffs", sid);
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, "context.md");
+      writeFileSync(file, text + "\n");
+      this.emit({ type: "handoff", status: "ready", percent, file, text, auto });
+      return { file, text };
+    } catch (err) {
+      this.emit({ type: "handoff", status: "failed", error: (err as Error).message, auto });
+      return null;
+    }
+  }
+
+  /** After a turn: past the threshold in the config, prepare the hand-off once. */
+  private maybeHandoff() {
+    const at = this.harness.cfg.context?.handoff_at;
+    const pct = this.lastContext?.percentage;
+    if (!at || pct == null || !this.sessionId || this.handoffOffered.has(this.sessionId)) return;
+    if (pct < at * 100) return;
+    this.handoffOffered.add(this.sessionId);
+    void this.handoff(true);
+  }
+
   /** /btw: side question on a throwaway fork. Safe to call while a turn runs. */
   async btw(question: string): Promise<string> {
     const opts: Partial<Options> = {
@@ -335,6 +404,10 @@ export class ChatEngine implements Engine {
       },
     };
     try {
+      if (this.pendingSeed) {
+        prompt = `${this.pendingSeed}\n\n---\n\n${prompt}`;
+        this.pendingSeed = "";
+      }
       let r: TurnResult = await h.run(prompt, { ...extra, ...(this.sessionId ? { resume: this.sessionId } : {}) }, hooks);
       this.sessionId = r.sessionId || this.sessionId;
 
@@ -370,6 +443,7 @@ export class ChatEngine implements Engine {
         isError: r.isError,
         error: r.isError ? r.text : undefined,
       });
+      if (!r.isError && !this.stopped) this.maybeHandoff();
     } catch (err) {
       this.emit({ type: "error", message: (err as Error).message });
     } finally {

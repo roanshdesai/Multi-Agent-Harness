@@ -490,6 +490,51 @@ test("token stats: daily totals from Claude Code and Codex transcripts", async (
   }
 });
 
+test("context hand-off: past the threshold a context.md is written once, and a new chat starts from it", async () => {
+  const { loadConfig } = await import("../src/config.js");
+  const { Host } = await import("../src/host.js");
+  const { existsSync, readFileSync } = await import("node:fs");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  cfg.context = { handoff_at: 0.8 };
+  const host = new Host(cfg, () => async () => "n");
+  const events: any[] = [];
+  host.listen((m) => m.type === "event" && events.push({ tab: m.tabId, ...m.event }));
+  const tab = host.createTab({ windowId: 1, title: "Big task" });
+  const t = (host as any).get(tab.id);
+  const prompts: string[] = [];
+  t.harness.run = async (p: string) => (prompts.push(p), { text: "# Context\n\nGoal: ship it.", isError: false, sessionId: "s1", numTurns: 1, costUsd: 0, agentsUsed: [] });
+  t.engine.sessionId = "s1";
+  t.engine.lastContext = { percentage: 70 };
+  (t.engine as any).maybeHandoff();
+  assert.equal(prompts.length, 0, "below the threshold: nothing");
+  t.engine.lastContext = { percentage: 83 };
+  (t.engine as any).maybeHandoff();
+  (t.engine as any).maybeHandoff(); // only once per chat
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(prompts.length, 1);
+  const ready = events.find((e) => e.type === "handoff" && e.status === "ready");
+  assert.ok(ready && ready.auto && ready.percent === 83);
+  assert.ok(existsSync(ready.file) && /Goal: ship it/.test(readFileSync(ready.file, "utf8")));
+
+  const next = host.continueInNewChat(tab.id, ready.file);
+  assert.notEqual(next.id, tab.id);
+  const n = (host as any).get(next.id);
+  assert.equal(n.harness.cwd, t.harness.cwd);
+  let sent = "";
+  n.harness.run = async (p: string) => ((sent = p), { text: "ok", isError: false, sessionId: "s2", numTurns: 1, costUsd: 0, agentsUsed: [] });
+  n.harness.verifyEnabled = false;
+  n.engine.send("carry on", "app");
+  await new Promise((r) => setTimeout(r, 50));
+  assert.match(sent, /continues an earlier one \("Big task"\)/);
+  assert.match(sent, /Goal: ship it[\s\S]*carry on$/);
+  assert.throws(() => host.continueInNewChat(tab.id, "/etc/passwd"), /isn't available/);
+  cfg.context = { handoff_at: 0 }; // 0 turns it off
+  t.engine.sessionId = "s3";
+  (t.engine as any).maybeHandoff();
+  assert.equal(prompts.length, 1);
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

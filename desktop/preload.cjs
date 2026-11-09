@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld("harness", {
   models: () => invoke("models"),
   tokenStats: () => invoke("token-stats"),
   codexLogin: () => invoke("codex-login"),
+  handoff: (tabId) => invoke("handoff", tabId),
+  continueInNewChat: (tabId, file) => invoke("handoff-continue", tabId, file),
   saveModels: (changes) => invoke("models-save", changes),
   connections: (reconnect) => invoke("connections", reconnect),
   mcpToggle: (name, enabled) => invoke("mcp-toggle", name, enabled),

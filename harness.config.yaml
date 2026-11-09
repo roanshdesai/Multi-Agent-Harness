@@ -43,6 +43,12 @@ limits:
   warn_at: 0.8   # show a heads-up when a usage window passes 80%
   refresh_minutes: 5   # re-read plan usage this often (0 = only at start and when you open Usage)
 
+context:
+  # When a chat's context window passes this share, write a hand-off summary
+  # (context.md) and offer to continue in a new chat that starts from it.
+  # 0 turns it off; /handoff does it any time.
+  handoff_at: 0.8
+
 # Also escalate to the advisor subagent after this many consecutive tool failures
 stuck_after_failures: 3
 

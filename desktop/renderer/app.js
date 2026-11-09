@@ -563,6 +563,55 @@ function addAdvice(s, status) {
 function addNote(s, text, cls = "") {
   append(s, el("div", `note ${cls}`, text));
 }
+/** Context is getting full: one card per chat that turns into "continue in a new chat". */
+function addHandoff(s, e) {
+  if (e.status === "failed") {
+    s.handoffCard?.remove();
+    s.handoffCard = null;
+    return addNote(s, `Couldn't write the hand-off summary: ${e.error}`, "error");
+  }
+  const pct = e.percent != null ? `${Math.round(e.percent)}%` : null;
+  const card = el("div", "handoff");
+  const top = el("div", "h-top");
+  top.append(el("span", "label-mono", "Context"), el("span", "", e.auto && pct ? `This chat's context is ${pct} full.` : pct ? `Context is ${pct} full.` : "Hand-off summary"));
+  card.appendChild(top);
+  if (e.status === "writing") {
+    const w = el("div", "h-body muted");
+    w.append(el("span", "spin"), document.createTextNode(" Writing a hand-off summary (context.md) so a new chat can pick up from here…"));
+    card.appendChild(w);
+  } else {
+    card.appendChild(el("div", "h-body", "A hand-off summary (context.md) is ready. Continue in a new chat and everything from this one goes with it, or keep going here."));
+    const acts = el("div", "row-actions");
+    const go = el("button", "btn primary sm", "Continue in a new chat");
+    go.onclick = async () => {
+      go.disabled = true;
+      try {
+        const t = await api.continueInNewChat(s.id, e.file);
+        const ns = ensureChatTab(t);
+        ns.loaded = true;
+        activate(t.id);
+        addNote(ns, `Continuing "${s.info.title}". Its hand-off summary (context.md) goes with your first message here.`);
+        input.focus();
+      } catch (err) {
+        addNote(s, String(err.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "error");
+        go.disabled = false;
+      }
+    };
+    const view = el("button", "btn sm", "View context.md");
+    view.onclick = () => {
+      const b = el("div", "bubble");
+      b.innerHTML = md(e.text ?? "");
+      const box = el("div");
+      box.append(el("p", "muted mono", e.file ?? ""), b);
+      modal("context.md", box);
+    };
+    acts.append(go, view);
+    card.appendChild(acts);
+  }
+  if (s.handoffCard?.isConnected) s.handoffCard.replaceWith(card);
+  else append(s, card);
+  s.handoffCard = card;
+}
 function addQuestion(s, id, questions) {
   endLive(s);
   const card = el("div", "question");
@@ -717,6 +766,9 @@ api.onEvent(({ tabId, event: e }) => {
       break;
     case "advisor":
       addAdvice(s, e.status);
+      break;
+    case "handoff":
+      addHandoff(s, e);
       break;
     case "usage":
       refreshUsage();
@@ -1911,6 +1963,9 @@ async function submit(mode = "send") {
       return showUsage();
     case "/connections":
       return showConnections();
+    case "/handoff":
+      if (s.info.kind === "gpt") return addNote(s, "Hand-off works on Claude chats. This tab runs on GPT.");
+      return api.handoff(s.id).catch((err) => addNote(s, err.message, "error"));
     case "/status":
       return showStatus();
     case "/models":

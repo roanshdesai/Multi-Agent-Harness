@@ -440,3 +440,10 @@ a { color: inherit; text-decoration-color: var(--ink-3); text-underline-offset: 
 .heat-legend { display: flex; align-items: center; gap: 3px; justify-content: flex-end; margin-top: 6px; font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); }
 .heat-legend span { margin: 0 4px; }
 .stats-fact { margin: 10px 0 0; color: var(--ink-2); font-size: 12.5px; }
+
+/* context hand-off card */
+.handoff { border: 1px solid var(--rule); border-left: 2px solid var(--amber); border-radius: 6px; padding: 9px 12px 10px; margin-bottom: 14px; background: var(--card); }
+.handoff .h-top { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; color: var(--ink); }
+.handoff .h-top .label-mono { color: var(--amber); }
+.handoff .h-body { font-size: 12.5px; color: var(--ink-2); margin: 4px 0 8px; }
+.handoff .h-body.muted { margin-bottom: 0; display: flex; align-items: center; gap: 6px; }

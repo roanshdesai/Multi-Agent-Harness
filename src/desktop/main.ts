@@ -267,6 +267,8 @@ ipcMain.handle("codex-login", async () => {
   if (st.ok) await host.refreshUsage();
   return st;
 });
+ipcMain.handle("handoff", (_e, tabId: string) => host.handoff(tabId));
+ipcMain.handle("handoff-continue", (_e, tabId: string, file: string) => host.continueInNewChat(tabId, file));
 ipcMain.handle("token-stats", () => tokenStats(cfg.root));
 ipcMain.handle("models", () => ({ models: cfg.models, available: availableModels, roles: MODEL_ROLES }));
 ipcMain.handle("models-save", (_e, changes: Partial<HarnessConfig["models"]>) => saveModels(cfg, changes));
