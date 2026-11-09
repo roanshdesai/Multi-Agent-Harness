@@ -15,7 +15,9 @@ services:
 
   hindsight:
     image: ghcr.io/vectorize-io/hindsight:latest
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false   # Hindsight starts without a .env too
     ports: ["8888:8888", "9999:9999"]   # API, and the web UI shown in the app sidebar
     volumes: [hindsight-data:/home/hindsight/.pg0]
 

@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { HarnessConfig } from "./config.js";
 
 /** Result of trying to start a memory service. */
@@ -78,14 +79,28 @@ export async function claudeMemDoctor(cfg: HarnessConfig): Promise<StartResult> 
   return { ok: r.code === 0, detail: r.code === 0 ? "claude-mem doctor finished." : "claude-mem doctor found problems.", output: r.output };
 }
 
-/** Start Hindsight with Docker, from this project's docker-compose.yml. */
+/**
+ * docker-compose.yml: in the data folder (cfg.root) if you keep one there,
+ * otherwise the one shipped with the app's code (one folder above dist/).
+ */
+export function composeFile(cfg: HarnessConfig): string | null {
+  const here = dirname(fileURLToPath(import.meta.url)); // …/dist
+  for (const dir of [cfg.root, join(here, ".."), process.cwd()]) {
+    const f = join(dir, "docker-compose.yml");
+    if (existsSync(f)) return f;
+  }
+  return null;
+}
+
+/** Start Hindsight with Docker, from docker-compose.yml. */
 export async function startHindsight(cfg: HarnessConfig): Promise<StartResult> {
-  if (!existsSync(join(cfg.root, "docker-compose.yml"))) return { ok: false, detail: "docker-compose.yml isn't in the harness folder." };
+  const file = composeFile(cfg);
+  if (!file) return { ok: false, detail: "Couldn't find docker-compose.yml (looked in the data folder and the app's folder)." };
   if (!has("docker")) return { ok: false, detail: "Docker isn't installed. Install Docker Desktop, open it, then try again." };
   const info = await run("docker", ["info", "--format", "{{.ServerVersion}}"], cfg.root, 20_000);
   if (info.code !== 0) return { ok: false, detail: "Docker is installed but not running. Open Docker Desktop, wait for it to start, then try again.", output: info.output };
   // The first start downloads the image, which can take a few minutes.
-  const r = await run("docker", ["compose", "up", "-d", "hindsight"], cfg.root, 15 * 60_000);
+  const r = await run("docker", ["compose", "-f", file, "up", "-d", "hindsight"], dirname(file), 15 * 60_000);
   if (r.code === 0) return { ok: true, detail: "Hindsight is starting in Docker.", output: r.output };
   return { ok: false, detail: "Docker couldn't start Hindsight.", output: r.output };
 }

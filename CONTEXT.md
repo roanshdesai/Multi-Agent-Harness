@@ -28,7 +28,7 @@ All models are set in `harness.config.yaml`, and can be changed in the app with 
 
 1. **Subscriptions only.** Claude runs on the Claude Code subscription login; GPT runs on the ChatGPT login through the Codex CLI. API keys are stripped (`src/subscription.ts`), and startup refuses API billing. `HARNESS_ALLOW_API=1` is an explicit opt-out, used only for testing in containers.
 2. **Only GitHub pushes, PRs and merges ask for approval** (`src/guards.ts`). Everything else runs without prompts (`permissionMode: bypassPermissions`). Pushes to `main`/`master` are always refused.
-3. **Git hosting:** never push to `main` unless the owner explicitly says so for that account. Work on feature branches and open draft PRs.
+3. **Git hosting:** never push to `main` from the `roansh-desai` account. On the `roanshdesai` account the owner has said to push to `main` (it is the branch to use); the work branch is kept in sync with it.
 4. **Never commit `.env`, tokens or personal info.** `.env`, `.harness/`, `vendor/`, `out/`, `release/` and `mcp-servers.json` are gitignored.
 5. **Design:** the UI must look original, not copied from VS Code or GitHub and not "vibe-coded" (no gradients, glows, glass or emoji). References are allowed; the owner's UI links library is `design-library/UI-LINKS.md`.
 
@@ -142,6 +142,20 @@ Fixed in the last review:
 
 ## Repo & branch
 
-- Work branch: `claude/agent-harness-model-routing-wun9p7`; draft PR #1 into `main`.
-- `main` holds only an empty starting commit.
-- The repo is still named `test` on GitHub. Rename it to `multi-agent-harness` under Settings, then General.
+- GitHub: `roanshdesai/test` (to be renamed `multi-agent-harness` under Settings → General; GitHub redirects the old URL).
+- `main` has everything. `claude/agent-harness-model-routing-wun9p7` (draft PR #1) is kept identical to it.
+- GitHub's default branch is still the work branch: switch it to `main` under Settings → General → Default branch.
+- On the owner's Mac the clone is a folder named `agent-harness`; the app's data folder is `~/.agent-harness` (logs in `~/.agent-harness/out/`, settings state in `~/.agent-harness/.harness/`).
+- Update on the Mac: quit the app, then `git pull origin main`, `npm install`, `npm run desktop`.
+
+## Where things stand (hand-off)
+
+Last session (cloud container, no Mac) built everything in "Features" and pushed it. What's left is checking it on the real Mac, in this order:
+
+1. **Codex/ChatGPT:** `npx codex login status` should say ChatGPT. Then GPT tabs, the ChatGPT usage meter, and whether Codex accepts the model names `gpt-6-astra` / `gpt-6.1-sol` (fix them in `/models` if not).
+2. **Hindsight:** Docker Desktop must be running. In the app: Memory → Hindsight → Start Hindsight. (Fixed: it used to look for docker-compose.yml only in `~/.agent-harness`; it now also uses the one in the app's folder, and `.env` is optional.) Check `docker ps` shows the hindsight container and http://localhost:9999 opens. Agents reach it at `memory.hindsight_mcp` (http://localhost:8888/mcp/).
+3. **claude-mem:** was running on the Mac (viewer on http://localhost:37701). Nothing to do unless it stops.
+4. **Computer use (GPT-6 Astra via Codex):** failed because Codex's computer-use helper on 127.0.0.1:19789 wasn't running. It belongs to OpenAI's computer-use plugin (`computer-use@openai-bundled`, likely provided by the ChatGPT/Codex desktop app), not to this repo. Check `npx codex plugin list`, `npx codex doctor`, `lsof -i :19789`; turn computer use on in the ChatGPT/Codex app (Screen Recording + Accessibility); then `/computer test` in the harness. All apps are allowed (`computer_use.default_app_access: allow`).
+5. **Claude in Chrome:** install the extension, sign in, restart the app; `claude-in-chrome` should show in Apps.
+6. **Pally:** add it in Apps (name `pally`, URL `https://agent.pally.com/mcp`), Sign in if it needs auth, then try `@pally …`. For `/remote`: `brew install cloudflared`, turn on `/remote`, Get a public link, add that link in Pally as an MCP server.
+7. **Packaging:** `npm run desktop:mac` builds the .dmg (untested).
