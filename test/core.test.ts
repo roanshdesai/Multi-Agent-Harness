@@ -683,3 +683,12 @@ test("push guard: chained, multi-line, global-option, --all and gh merges can't 
   assert.equal(await run("gh pr create --fill"), "allow"); // asked, user said y
   assert.equal(await run("gh pr list"), "none");
 });
+
+test("Hindsight: a native macOS install is found by its launch agents", async () => {
+  const { hindsightLaunchAgents } = await import("../src/memory.js");
+  const home = mkdtempSync(join(tmpdir(), "home-"));
+  assert.deepEqual(hindsightLaunchAgents(home), []);
+  mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
+  writeFileSync(join(home, "Library", "LaunchAgents", "io.vectorize.hindsight-api.plist"), "<plist/>");
+  assert.deepEqual(hindsightLaunchAgents(home), ["io.vectorize.hindsight-api"]);
+});

@@ -92,8 +92,33 @@ export function composeFile(cfg: HarnessConfig): string | null {
   return null;
 }
 
-/** Start Hindsight with Docker, from docker-compose.yml. */
+/**
+ * Hindsight's own macOS install (`hindsight-api` + its web UI) runs as launch
+ * agents rather than in Docker. Returns the labels whose plist is installed.
+ */
+export function hindsightLaunchAgents(home = homedir()): string[] {
+  const dir = join(home, "Library", "LaunchAgents");
+  return ["io.vectorize.hindsight-api", "io.vectorize.hindsight-ui"].filter((l) => existsSync(join(dir, `${l}.plist`)));
+}
+
+/**
+ * Start Hindsight: through its own launch agents when it's installed natively
+ * on a Mac, otherwise with Docker from docker-compose.yml.
+ */
 export async function startHindsight(cfg: HarnessConfig): Promise<StartResult> {
+  const agents = process.platform === "darwin" ? hindsightLaunchAgents() : [];
+  if (agents.length && typeof process.getuid === "function") {
+    const uid = process.getuid();
+    let output = "";
+    for (const label of agents) {
+      // Loaded already: kickstart restarts it. Not loaded (unloaded by hand): bootstrap loads and starts it.
+      let r = await run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], cfg.root, 30_000);
+      if (r.code !== 0) r = await run("launchctl", ["bootstrap", `gui/${uid}`, join(homedir(), "Library", "LaunchAgents", `${label}.plist`)], cfg.root, 30_000);
+      output += `${label}: ${r.code === 0 ? "started" : r.output || `exit ${r.code}`}\n`;
+      if (r.code !== 0) return { ok: false, detail: `Couldn't start Hindsight's ${label} service.`, output: output.trim() };
+    }
+    return { ok: true, detail: "Hindsight is starting (its own macOS services).", output: output.trim() };
+  }
   const file = composeFile(cfg);
   if (!file) return { ok: false, detail: "Couldn't find docker-compose.yml (looked in the data folder and the app's folder)." };
   if (!has("docker")) return { ok: false, detail: "Docker isn't installed. Install Docker Desktop, open it, then try again." };
