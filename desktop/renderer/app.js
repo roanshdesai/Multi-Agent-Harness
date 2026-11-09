@@ -615,7 +615,7 @@ function setBusyUi(b) {
   $("composer").classList.toggle("running", b);
   $("hint").textContent = b
     ? "working · ⌘↵ corrects it now · ↵ queues for after"
-    : "↵ send · ⇧↵ new line · / commands";
+    : "↵ send · ⇧↵ new line · / commands · @ apps";
 }
 function miniGrid(ctx) {
   const g = el("span", "mini-grid");
@@ -705,7 +705,7 @@ function buildModelSelect() {
   const claude = el("optgroup");
   claude.label = "Claude · your Claude plan";
   // Your list from /models; if empty, everything your plan offers; always the current main model.
-  const names = new Map((info.availableModels ?? []).map((m) => [m.value, m.displayName]));
+  const names = new Map((info.availableModels ?? []).filter((m) => m.displayName).map((m) => [m.value, m.displayName]));
   const mine = info.models.claude?.length ? info.models.claude : [...names.keys()];
   const curModel = cur()?.info?.model;
   for (const m of [...new Set([info.models.main, ...mine, ...(curModel && !isGpt(curModel) ? [curModel] : [])])]) {
@@ -750,7 +750,7 @@ async function showModels() {
   for (const m of data.available) {
     const o = el("option");
     o.value = m.value;
-    o.label = m.displayName;
+    o.label = m.displayName || shortModel(m.value);
     all.appendChild(o);
   }
   for (const m of data.models.gpt ?? []) {
@@ -1598,7 +1598,42 @@ function autoSize() {
   $("sendBtn").disabled = !input.value.trim();
   $("changeBtn").disabled = !input.value.trim();
 }
+// ── @apps: name a connected MCP server in a message ───────────────────────
+/** Short name after @, e.g. "plugin:small-business:stripe" → "stripe" (same rule as the engine). */
+function mentionAlias(server) {
+  return (server.split(/[:/]/).pop() ?? server).replace(/^claude\.ai\s+/i, "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+}
+/** The "@partial" being typed just before the cursor, or null. */
+function mentionQuery() {
+  const before = input.value.slice(0, input.selectionStart ?? input.value.length);
+  const m = before.match(/(?:^|\s)@([a-z0-9_.:-]*)$/i);
+  return m ? m[1].toLowerCase() : null;
+}
+function appsByAlias() {
+  const map = new Map();
+  for (const c of connState) if (c.enabled) map.set(mentionAlias(c.name), c);
+  return map;
+}
+/** Servers named with @ in a message, as their real names. */
+function mentionsIn(text) {
+  const map = appsByAlias();
+  const out = new Set();
+  for (const m of text.matchAll(/(?:^|\s)@([a-z0-9_-]+)/gi)) {
+    const c = map.get(m[1].toLowerCase());
+    if (c) out.add(c.name);
+  }
+  return [...out];
+}
 function slashMatches() {
+  const mq = mentionQuery();
+  if (mq !== null) {
+    const status = (c) => (c.status === "connected" ? `${c.tools} tool${c.tools === 1 ? "" : "s"}` : c.status === "needs-auth" ? "needs sign-in" : c.status);
+    return [...appsByAlias()]
+      .filter(([a, c]) => a.startsWith(mq) || c.name.toLowerCase().includes(mq))
+      .sort(([, a], [, b]) => (a.status === "connected" ? 0 : 1) - (b.status === "connected" ? 0 : 1))
+      .slice(0, 40)
+      .map(([a, c]) => ({ name: `@${a}`, description: `${status(c)} · ${c.source}`, group: "Apps", mention: true }));
+  }
   const v = input.value.toLowerCase();
   if (!v.startsWith("/") || v.includes(" ") || v.includes("\n")) return [];
   const q = v.slice(1);
@@ -1623,10 +1658,19 @@ function renderSlash() {
     r.setAttribute("role", "option");
     r.title = `${c.name}${c.args ? ` ${c.args}` : ""}\n${c.description}`;
     r.append(el("code", "", c.name), el("span", "", (c.args ? `${c.args} · ` : "") + c.description));
-    r.onmousedown = (e) => (e.preventDefault(), pickSlash(c.name));
+    r.onmousedown = (e) => (e.preventDefault(), c.mention ? pickMention(c.name) : pickSlash(c.name));
     menu.appendChild(r);
   });
   menu.querySelector(".sel")?.scrollIntoView({ block: "nearest" });
+}
+function pickMention(tag) {
+  const pos = input.selectionStart ?? input.value.length;
+  const before = input.value.slice(0, pos).replace(/@[a-z0-9_.:-]*$/i, `${tag} `);
+  input.value = before + input.value.slice(pos);
+  input.selectionStart = input.selectionEnd = before.length;
+  $("slashMenu").hidden = true;
+  autoSize();
+  input.focus();
 }
 function pickSlash(c) {
   input.value = c + " ";
@@ -1708,7 +1752,7 @@ async function submit(mode = "send") {
       }
       return addNote(s, `This tab runs on ${shortModel(arg || s.info.model)}.`);
   }
-  api.send(s.id, text);
+  api.send(s.id, text, mentionsIn(text));
 }
 input.addEventListener("input", () => {
   autoSize();
@@ -1722,6 +1766,10 @@ input.addEventListener("keydown", (e) => {
       e.preventDefault();
       slashIndex = (slashIndex + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
       return renderSlash();
+    }
+    if (items[slashIndex].mention && (e.key === "Tab" || e.key === "Enter")) {
+      e.preventDefault();
+      return pickMention(items[slashIndex].name);
     }
     if (e.key === "Tab" || (e.key === "Enter" && items[slashIndex].name !== input.value.trim())) {
       e.preventDefault();

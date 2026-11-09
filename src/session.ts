@@ -192,6 +192,7 @@ export class Harness {
   }
 
   /** Claude models your plan offers (from Claude Code), for the model pickers. */
+  /** displayName is empty when the plan only names the model by an alias; the app then derives it from the id. */
   availableModels: { value: string; displayName: string }[] = [];
 
   /** Read plan usage now (not only when a message runs). Uses the SDK's experimental usage call when present. */
@@ -306,7 +307,9 @@ export class Harness {
         const seen = new Map<string, { value: string; displayName: string }>();
         for (const m of await q.supportedModels()) {
           const value = m.resolvedModel ?? m.value;
-          if (!seen.has(value)) seen.set(value, { value, displayName: m.displayName });
+          // An alias row ("default", "opus") names the slot, not the model; prefer the model's own row.
+          const own = m.value === value;
+          if (!seen.has(value) || own) seen.set(value, { value, displayName: own ? m.displayName : (seen.get(value)?.displayName ?? "") });
         }
         this.availableModels = [...seen.values()];
       } catch {

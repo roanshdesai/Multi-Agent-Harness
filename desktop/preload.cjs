@@ -43,7 +43,7 @@ contextBridge.exposeInMainWorld("harness", {
   closeTab: (tabId) => invoke("tab-close", tabId),
   focusTab: (tabId) => invoke("tab-focus", tabId),
   tabHistory: (tabId) => invoke("tab-history", tabId),
-  send: (tabId, text) => invoke("send", tabId, text),
+  send: (tabId, text, mentions) => invoke("send", tabId, text, mentions),
   stop: (tabId) => invoke("stop", tabId),
   btw: (tabId, q) => invoke("btw", tabId, q),
   newChat: (tabId) => invoke("new-chat", tabId),

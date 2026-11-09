@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { Harness } from "./session.js";
-import { ChatEngine, expandShortcut, type ChatEvent, type Engine } from "./engine.js";
+import { ChatEngine, expandShortcut, mentionNote, parseMentions, type ChatEvent, type Engine } from "./engine.js";
 import { GptChat, isGptChat, listGptChats } from "./gpt-chat.js";
 import { buildAgents, agentRunsOn, customAgentNames } from "./agents.js";
 import { canonical } from "./commands.js";
@@ -603,7 +603,7 @@ function printBtw(answer: string) {
 
 function send(text: string) {
   if (bridge && tabId) void bridge.request("send", { tabId, text });
-  else engine.send(text, "terminal");
+  else engine.send(text, "terminal", text + mentionNote(parseMentions(text)));
 }
 
 async function handle(line: string) {
@@ -642,7 +642,7 @@ async function main() {
     rl.on("line", (l) => answerAsk(l));
     await new Promise<void>((resolve) => {
       idleWaiter = resolve;
-      engine.send(once, "terminal");
+      engine.send(once, "terminal", once + mentionNote(parseMentions(once)));
     });
     process.exit(0);
   }

@@ -302,7 +302,7 @@ ipcMain.handle("tab-new", (e, opts: { model?: string; chatId?: string; title?: s
 ipcMain.handle("tab-close", (_e, tabId: string) => host.closeTab(tabId));
 ipcMain.handle("tab-focus", (_e, tabId: string) => host.focus(tabId));
 ipcMain.handle("tab-history", (_e, tabId: string) => host.history(tabId));
-ipcMain.handle("send", (_e, tabId: string, text: string) => host.send(tabId, text, "app"));
+ipcMain.handle("send", (_e, tabId: string, text: string, mentions?: string[]) => host.send(tabId, text, "app", mentions));
 ipcMain.handle("stop", (_e, tabId: string) => host.stop(tabId));
 ipcMain.handle("btw", (_e, tabId: string, q: string) => host.btw(tabId, q));
 ipcMain.handle("new-chat", (_e, tabId: string) => host.newChat(tabId));

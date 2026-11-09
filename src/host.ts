@@ -1,7 +1,7 @@
 import { listSessions } from "@anthropic-ai/claude-agent-sdk";
 import type { HarnessConfig } from "./config.js";
 import { Harness } from "./session.js";
-import { ChatEngine, expandShortcut, type ChatEvent, type ChatSummary, type Engine, type HistoryItem } from "./engine.js";
+import { ChatEngine, expandShortcut, mentionNote, parseMentions, type ChatEvent, type ChatSummary, type Engine, type HistoryItem } from "./engine.js";
 import { GptChat, listGptChats, isGptChat } from "./gpt-chat.js";
 import type { Ask } from "./guards.js";
 import { isExhausted, loadUsage, formatReset, type UsageSnapshot } from "./usage.js";
@@ -24,7 +24,7 @@ interface Tab {
   harness: Harness;
   title: string;
   /** Set while the tab is moving to GPT; messages sent meanwhile wait here. */
-  switching?: { text: string; source: string }[];
+  switching?: { text: string; source: string; prompt: string }[];
 }
 
 export type HostListener = (msg: { type: "event"; tabId: string; event: ChatEvent } | { type: "tabs"; tabs: TabInfo[] }) => void;
@@ -187,9 +187,9 @@ export class Host {
       if (t.engine === gpt) {
         this.note(tabId, `Claude's usage limit is reached${resets ? ` (resets ${resets})` : ""}. Continuing this task on ${this.cfg.models.gpt[0]} with your ChatGPT plan.`);
         gpt.send(prompt, "auto");
-        for (const m of waiting) gpt.send(m.text, m.source);
+        for (const m of waiting) gpt.send(m.text, m.source, m.prompt);
       } else {
-        for (const m of waiting) t.engine.send(m.text, m.source);
+        for (const m of waiting) t.engine.send(m.text, m.source, m.prompt);
       }
     }
   }
@@ -229,16 +229,21 @@ export class Host {
     if (this.tabs.has(tabId)) this.activeTab = tabId;
   }
 
-  send(tabId: string, text: string, source = "app") {
+  /**
+   * Send a message. `mentions` are MCP servers named with @ (the app resolves
+   * them); without it, @names in the text are passed through as typed.
+   */
+  send(tabId: string, text: string, source = "app", mentions?: string[]) {
     const t = this.get(tabId);
     const [cmd, ...rest] = text.trim().split(/\s+/);
     const msg = expandShortcut(cmd, rest.join(" ")) ?? text;
+    const prompt = msg + mentionNote(mentions ?? parseMentions(text));
     if (t.switching) {
-      t.switching.push({ text: msg, source });
+      t.switching.push({ text: msg, source, prompt });
       this.broadcast({ type: "event", tabId, event: { type: "user", text: msg, source, queued: true } });
       return;
     }
-    t.engine.send(msg, source);
+    t.engine.send(msg, source, prompt);
   }
 
   stop(tabId: string) {

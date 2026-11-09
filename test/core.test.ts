@@ -406,6 +406,29 @@ test("models: saved back to the config file, comments kept, applied at once", as
   assert.throws(() => saveModels(cfg, { gpt: [] }), /at least one GPT/);
 });
 
+test("@apps: a named app reaches the model as an instruction; the shown message stays as typed", async () => {
+  const { mentionAlias, mentionNote, parseMentions, mcpPrefix } = await import("../src/engine.js");
+  assert.equal(mentionAlias("plugin:small-business:stripe"), "stripe");
+  assert.equal(mentionAlias("claude.ai Slack"), "slack");
+  assert.equal(mentionAlias("pally"), "pally");
+  assert.equal(mcpPrefix("plugin:small-business:stripe"), "mcp__plugin_small-business_stripe__");
+  assert.deepEqual(parseMentions("ask @pally and @slack, not me@example.com"), ["pally", "slack"]);
+  assert.equal(mentionNote([]), "");
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const { loadConfig } = await import("../src/config.js");
+  const { Host } = await import("../src/host.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const host = new Host(cfg, () => async () => "n");
+  const tab = host.createTab({ windowId: 1 });
+  const got: any[] = [];
+  (host as any).get(tab.id).engine.send = (text: string, source: string, prompt: string) => got.push({ text, prompt });
+  host.send(tab.id, "post the summary @slack", "app", ["claude.ai Slack"]);
+  assert.equal(got[0].text, "post the summary @slack");
+  assert.match(got[0].prompt, /claude\.ai Slack \(tools named mcp__claude_ai_Slack__\*\)/);
+  delete process.env.HARNESS_CODEX_BIN;
+});
+
 test("docs: finds documents, spots PRDs, refuses paths outside the project", async () => {
   const { listDocs, isPrd, readDoc, safePath } = await import("../src/docs.js");
   const dir = mkdtempSync(join(tmpdir(), "docs-"));

@@ -65,7 +65,8 @@ export interface Engine {
   model: string;
   sessionId?: string;
   busy: boolean;
-  send(text: string, source?: string): void;
+  /** Send a message. `prompt` is what the model gets when it differs from what's shown (e.g. @app notes). */
+  send(text: string, source?: string, prompt?: string): void;
   stop(): Promise<void>;
   newChat(): void;
   resume(id: string): void;
@@ -90,6 +91,26 @@ export function summarizeInput(input: any): string {
 }
 
 /** Slash commands that just turn into a prompt for a specific specialist. */
+/** The tool-name prefix Claude Code gives an MCP server's tools. */
+export const mcpPrefix = (server: string) => `mcp__${server.replace(/[^a-zA-Z0-9_-]/g, "_")}__`;
+
+/** Short name used after @ for a server, e.g. "plugin:small-business:stripe" → "stripe". */
+export const mentionAlias = (server: string) =>
+  (server.split(/[:/]/).pop() ?? server).replace(/^claude\.ai\s+/i, "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+
+/** @names in a message (terminal fallback when the app didn't resolve them). */
+export const parseMentions = (text: string) => [...new Set([...text.matchAll(/(?:^|\s)@([a-z0-9_.:-]+)/gi)].map((m) => m[1]))];
+
+/**
+ * What the model is told when you name apps with @: use those apps' tools
+ * for this request. The orchestrator may call them itself here.
+ */
+export function mentionNote(servers: string[]): string {
+  if (!servers.length) return "";
+  const list = servers.map((s) => `${s} (tools named ${mcpPrefix(s)}*)`).join(", ");
+  return `\n\n[The user named these connected apps: ${list}. Use their tools for this request. You may call them yourself, even though you normally delegate; if you delegate, tell the agent to use these tools. If an app isn't connected or needs sign-in, say so.]`;
+}
+
 export function expandShortcut(cmd: string, arg: string): string | null {
   switch (cmd) {
     case "/advisor":
@@ -103,7 +124,7 @@ export function expandShortcut(cmd: string, arg: string): string | null {
     case "/video":
       return `Delegate to the "video" agent: ${arg}`;
     case "/image":
-      return `Delegate to the "image" agent (GPT-6.1 Sol): ${arg}`;
+      return `Delegate to the "image" agent: ${arg}`;
     case "/remember":
       return `Store this in long-term memory (Hindsight retain), confirm briefly: ${arg}`;
     case "/recall":
@@ -181,13 +202,13 @@ export class ChatEngine implements Engine {
   }
 
   /** Send user input; queued if a turn is already running. `source` says which app typed it. */
-  send(text: string, source?: string) {
+  send(text: string, source?: string, prompt = text) {
     this.emit({ type: "user", text, queued: this.busy, source });
     if (this.busy) {
-      this.queue.push(text);
+      this.queue.push(prompt);
       return;
     }
-    void this.runTurn(text);
+    void this.runTurn(prompt);
   }
 
   async stop() {

@@ -95,8 +95,11 @@ The terminal version (`npm start`) runs on the same engine and has the same comm
 
 ## Commands
 
+Name a connected app with `@` anywhere in a message, for example `@pally find my open tasks` or `post this summary to @slack`. Typing `@` lists your connected apps. The agent is told to use that app's tools for the request.
+
 | Command | What it does |
 |---|---|
+| `/models` | Pick the model for each role, and which models the model picker offers. Saved to `harness.config.yaml`. |
 | `/fork [title]` | Copies this chat and opens the copy in a **new terminal window** (tmux, macOS Terminal or iTerm, Windows Terminal, or a Linux terminal). `--here` switches to the copy in place instead. |
 | `/btw <q>` | Asks a side question on a throwaway copy of the chat. Works while a turn is running and never changes the main chat. |
 | `/change <correction>` | Correct the running task without stopping it (⌘Enter in the app) |

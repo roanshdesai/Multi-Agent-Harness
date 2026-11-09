@@ -69,13 +69,13 @@ export class GptChat implements Engine {
     writeFileSync(this.file(this.sessionId), JSON.stringify(data, null, 1));
   }
 
-  send(text: string, source?: string) {
+  send(text: string, source?: string, prompt = text) {
     this.emit({ type: "user", text, queued: this.busy, source });
     if (this.busy) {
-      this.queue.push(text);
+      this.queue.push(prompt);
       return;
     }
-    void this.runTurn(text);
+    void this.runTurn(prompt);
   }
 
   async stop() {
