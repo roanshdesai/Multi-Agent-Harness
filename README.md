@@ -42,11 +42,13 @@ Each MCP server is only loaded once its keys are in `.env`. `/status` shows whic
 
 ## Desktop app
 
-Laid out like VS Code, with GitHub's look:
-- **Activity bar** on the left: Chats, Documents, Memory, MCP servers & apps, Team.
-- **Explorer** for the pane you pick.
-- **Editor-style tabs.**
-- **Status bar** at the bottom: folder, model, verifier, the context grid, Claude usage and ChatGPT.
+Its own look, built to read like a document and an instrument:
+- **Type:** a serif for titles and your prompts, a sans-serif for replies, and monospace for small labels and numbers.
+- **Colour:** warm paper and ink. Each model family gets one quiet mark: clay for Claude, moss for GPT, plum for the advisor.
+- **Agent work:** shown as a timeline on a thin line, not as boxes.
+- **Sidebar:** the workspace, then text-label sections (Chats · Docs · Memory · Apps · Team), with an instrument panel at the bottom showing the context grid, Claude usage and ChatGPT.
+- **References:** GitHub, VS Code and Vercel informed how it works, not how it looks.
+- **From the UI links library, used sparingly:** a progressive blur under the header (Glur, done for the web), numbers that tick when they change and steps that ease in (Magic UI), and small press and hover details (Design Spells).
 
 **/change:** while a task runs, type a correction and press ⌘Enter, click **Change now**, or use `/change <what to do differently>`. The agent adjusts at its next step without stopping, so you don't need Esc. Enter still queues a message for after the current turn. In a linked terminal, `/change` does the same.
 

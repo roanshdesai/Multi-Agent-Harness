@@ -96,42 +96,54 @@ function makeView(full = false) {
   viewsEl.appendChild(view);
   return view;
 }
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? "Working late." : h < 12 ? "Good morning." : h < 18 ? "Good afternoon." : "Good evening.";
+}
 function welcome() {
   const w = el("div", "welcome");
-  const h = el("header");
-  h.append(el("h2", "", "Agent Harness"), el("p", "", "Opus plans and delegates · Fable codes and advises · Sonnet researches · GPT handles images and UI tests"));
-  const start = el("div");
-  start.append(el("h3", "", "Start"));
-  const link = (ic, text, fn, key) => {
-    const b = el("button", "link");
-    b.append(icon(ic), el("span", "", text));
-    if (key) b.append(el("span", "k", key));
-    b.onclick = fn;
-    return b;
-  };
-  start.append(
-    link("plus", "New task", () => newTab(), "⌘T"),
-    link("folder", "Open folder…", () => $("sbFolder").click()),
-    link("people", "Create a subagent…", () => showSubagents()),
-    link("doc", "Summarize a document…", () => setPane("docs")),
+  const folder = (info?.workspace ?? "").split(/[\\/]/).pop() || "this folder";
+  const mine = agents.filter((a) => a.custom).length;
+  w.append(
+    el("div", "kicker label-mono", `${folder} · ${new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}`),
+    el("h2", "", greeting()),
+    el("p", "lede", `Describe a task. ${shortModel(info?.models.main ?? "claude-opus-5-5")} plans it and hands the pieces to the team: Fable for code and hard calls, Sonnet for research, GPT for images and UI tests${mine ? `, plus your ${mine} subagent${mine === 1 ? "" : "s"}` : ""}.`),
   );
-  start.append(el("h3", "", "Try"));
-  for (const [t, p] of [
-    ["Compare the animation libraries in my design library", "/research "],
-    ["Build a landing page hero with Magic UI components", "/code "],
-    ["Make an app icon: a node graph, soft gradient", "/image "],
-  ]) start.append(link("chevR", t, () => ((input.value = p + t), autoSize(), input.focus())));
+  const cols = el("div", "cols");
+  const starters = el("div");
+  starters.append(el("h3", "label-mono", "Start with"));
+  const items = [
+    ["Research", "Compare the animation libraries in my design library", "/research "],
+    ["Build", "A landing page hero with Magic UI components", "/code "],
+    ["Image", "An app icon: a node graph on warm paper", "/image "],
+    ["Team", "Suggest subagents for this project", "/subagents "],
+  ];
+  items.forEach(([k, t, p], i) => {
+    const b = el("button", "starter");
+    const txt = el("span", "txt");
+    txt.append(document.createTextNode(t), el("small", "", k));
+    b.append(el("span", "num", String(i + 1).padStart(2, "0")), txt);
+    b.onclick = () => {
+      if (p === "/subagents ") return showSubagents();
+      input.value = p + t;
+      autoSize();
+      input.focus();
+    };
+    starters.append(b);
+  });
   const recent = el("div");
-  recent.append(el("h3", "", "Recent"));
-  for (const c of allChats.slice(0, 6)) recent.append(link("chat", c.title || "Untitled", () => openChat(c)));
-  if (!allChats.length) recent.append(el("p", "muted", "No chats in this folder yet."));
-  recent.append(el("h3", "", "Shortcuts"));
-  for (const [k, d] of [["⌘T", "New task tab"], ["⌘Enter", "Change the running task"], ["⌘K", "Search chats"], ["/", "Commands"]]) {
-    const r = el("div", "muted");
-    r.textContent = `${k}  ${d}`;
-    recent.append(r);
-  }
-  w.append(h, start, recent);
+  recent.append(el("h3", "label-mono", "Pick up where you left off"));
+  if (!allChats.length) recent.append(el("p", "muted", "Nothing yet in this workspace."));
+  allChats.slice(0, 4).forEach((c, i) => {
+    const b = el("button", "starter");
+    const txt = el("span", "txt");
+    txt.append(document.createTextNode(c.title || "Untitled"), el("small", "", `${groupLabel(c.updated)}${c.kind === "gpt" ? " · GPT" : ""}`));
+    b.append(el("span", "num", String(i + 1).padStart(2, "0")), txt);
+    b.onclick = () => openChat(c);
+    recent.append(b);
+  });
+  cols.append(starters, recent);
+  w.append(cols);
   return w;
 }
 function ensureChatTab(t) {
@@ -157,26 +169,25 @@ function addLocalTab(type, title, extra) {
 function renderTabs() {
   const bar = $("tabs");
   bar.textContent = "";
-  for (const id of order) {
+  order.forEach((id, idx) => {
     const s = tabs.get(id);
-    if (!s) continue;
+    if (!s) return;
     const chat = s.type === "chat";
-    const b = el("div", `tab${id === active ? " active" : ""}`);
+    const b = el("div", `tab${id === active ? " active" : ""}${chat && s.info.busy ? " busy" : ""}`);
     b.setAttribute("role", "tab");
     b.tabIndex = 0;
-    if (chat && s.info.busy) b.appendChild(el("span", "spin"));
-    else b.appendChild(icon(chat ? "chat" : s.type === "doc" ? "doc" : "db", `ticon${chat && isGpt(s.info.model) ? " gpt" : ""}`));
-    b.appendChild(el("span", "t", chat ? s.info.title : s.title));
-    const x = el("button", "x");
-    x.appendChild(icon("x"));
+    b.append(el("span", "n", String(idx + 1).padStart(2, "0")));
+    b.append(el("span", `mark${chat ? (isGpt(s.info.model) ? " gpt" : "") : s.type === "doc" ? " doc" : " mem"}`));
+    b.append(el("span", "t", chat ? s.info.title : s.title));
+    const x = el("button", "x", "×");
     x.title = "Close (⌘W)";
     x.onclick = (e) => (e.stopPropagation(), closeTab(id));
-    b.appendChild(x);
+    b.append(x);
     b.title = chat ? `${s.info.title} · ${shortModel(s.info.model)}${s.info.busy ? " · working" : ""}` : s.title;
     b.onclick = () => activate(id);
     b.onauxclick = (e) => e.button === 1 && closeTab(id);
     bar.appendChild(b);
-  }
+  });
   bar.querySelector(".tab.active")?.scrollIntoView({ inline: "nearest", block: "nearest" });
 }
 function activate(id) {
@@ -230,19 +241,37 @@ function append(s, node) {
   const stick = atBottom(s.view);
   s.empty.hidden = true;
   s.view.appendChild(node);
+  s.logInner = null; // the next agent step starts a new log segment
   if (stick) s.view.scrollTop = s.view.scrollHeight;
   return node;
 }
-function who(kind, label, extra) {
+/** Agent work (handoffs, tools, verifier, advisor) is drawn as a log on one hairline. */
+function logAppend(s, node) {
+  if (!s.logInner) {
+    const wrap = el("div", "log");
+    s.logInner = el("div", "log-inner");
+    wrap.appendChild(s.logInner);
+    const stick = atBottom(s.view);
+    s.empty.hidden = true;
+    s.view.appendChild(wrap);
+    if (stick) s.view.scrollTop = s.view.scrollHeight;
+  }
+  const stick = atBottom(s.view);
+  s.logInner.appendChild(node);
+  if (stick) s.view.scrollTop = s.view.scrollHeight;
+  return node;
+}
+const clock = () => new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function who(kind, label, extra, time) {
   const w = el("div", "who");
-  const av = el("span", `avatar${kind === "ai" ? " ai" : kind === "gpt" ? " gpt" : ""}`, kind === "user" ? "Y" : kind === "gpt" ? "G" : "C");
-  w.append(av, el("span", "", label));
+  w.append(el("span", `mk${kind === "ai" ? " ai" : kind === "gpt" ? " gpt" : ""}`), el("span", "", label));
+  if (time) w.append(el("span", "", `· ${time}`));
   if (extra) w.append(el("span", "src", extra));
   return w;
 }
-function addUser(s, text, source, queued, change) {
+function addUser(s, text, source, queued, change, live = true) {
   const m = el("div", `msg user${change ? " change" : ""}`);
-  m.append(who("user", "You", change ? "· change while working" : source === "terminal" ? "· from terminal" : source === "auto" ? "· re-sent automatically" : queued ? "· queued" : ""));
+  m.append(who("user", "You", change ? "correction, mid-task" : source === "terminal" ? "from the terminal" : source === "auto" ? "re-sent automatically" : queued ? "queued" : "", live ? clock() : ""));
   m.append(el("div", "bubble", text));
   append(s, m);
   s.view.scrollTop = s.view.scrollHeight;
@@ -250,7 +279,7 @@ function addUser(s, text, source, queued, change) {
 function assistantShell(s) {
   const m = el("div", "msg assistant");
   const gpt = isGpt(s.info.model);
-  m.append(who(gpt ? "gpt" : "ai", shortModel(s.info.model)));
+  m.append(who(gpt ? "gpt" : "ai", shortModel(s.info.model), "", s.loaded && !s.replaying ? clock() : ""));
   const b = el("div", "bubble");
   m.append(b);
   return { m, b };
@@ -290,15 +319,13 @@ function addAgent(s, id, agent, description) {
   endLive(s);
   const card = el("div", "agent-card");
   const head = el("div", "agent-head");
-  const state = el("span", "state");
-  state.appendChild(el("span", "spin"));
   const count = el("span", "agent-count", "");
-  head.append(icon("chevR", "chev-r"), state, el("span", "agent-name", agent), el("span", "agent-model", modelFor(agent)), el("span", "agent-desc", description), count);
+  head.append(el("span", "agent-name", agent), el("span", "agent-model", modelFor(agent)), el("span", "agent-desc", description), count);
   const tools = el("div", "agent-tools");
   head.onclick = () => card.classList.toggle("open");
   card.append(head, tools);
-  append(s, card);
-  const entry = { card, state, tools, count, n: 0, done: false };
+  logAppend(s, card);
+  const entry = { card, tools, count, n: 0, done: false };
   s.agents.set(id, entry);
   s.lastAgent = entry;
 }
@@ -306,8 +333,7 @@ function finishAgents(s) {
   for (const c of s.agents.values()) {
     if (c.done) continue;
     c.done = true;
-    c.state.textContent = "";
-    c.state.appendChild(icon("check"));
+    c.card.classList.add("done");
   }
 }
 function addTool(s, name, summary, sub) {
@@ -324,27 +350,27 @@ function addTool(s, name, summary, sub) {
   endLive(s);
   const w = el("div", "main-tool");
   w.appendChild(row);
-  append(s, w);
+  logAppend(s, w);
 }
 function addVerify(s, e) {
   endLive(s);
   s.view.querySelector(".verify.running")?.remove();
-  const v = el("div", `verify${e.status === "running" ? " running" : ""}`);
   if (e.status === "running") {
     finishAgents(s);
-    v.append(el("span", "spin"), el("span", "", `Verifier (${modelFor("verifier")}) checking${e.round > 1 ? `, round ${e.round}` : ""}`));
-    append(s, v);
+    const v = el("div", "verify running");
+    v.append(el("span", "k", "Verifying"), el("span", "spin"), el("span", "", `${modelFor("verifier")} is checking the work${e.round > 1 ? ` (round ${e.round})` : ""}`));
+    logAppend(s, v);
     return;
   }
-  const lab = el("span", `label ${e.status === "pass" ? "ok" : "bad"}`, e.status === "pass" ? "Verified" : "Changes requested");
-  v.append(lab, el("span", "", `by ${modelFor("verifier")}`));
-  append(s, v);
+  const v = el("div", `verify ${e.status === "pass" ? "ok" : "bad"}`);
+  const k = el("span", "k", e.status === "pass" ? "Verified" : "Changes requested");
+  v.append(k, el("span", "", e.status === "pass" ? `${modelFor("verifier")} checked it` : `${modelFor("verifier")} sent it back; fixing`));
+  logAppend(s, v);
   if (e.status === "fail" && e.feedback) {
     const d = el("div", "verify-detail", e.feedback.slice(0, 3000));
     d.hidden = true;
-    lab.style.cursor = "pointer";
-    lab.onclick = () => (d.hidden = !d.hidden);
-    append(s, d);
+    k.onclick = () => (d.hidden = !d.hidden);
+    logAppend(s, d);
   }
 }
 function addAdvice(s, status) {
@@ -352,14 +378,14 @@ function addAdvice(s, status) {
     const last = [...s.view.querySelectorAll(".advice")].pop();
     if (last) {
       last.querySelector(".spin")?.remove();
-      last.querySelector(".txt").textContent = `Consulted the advisor (${shortModel(info.models.advisor)})`;
+      last.querySelector(".txt").textContent = `${shortModel(info.models.advisor)} weighed in`;
     }
     return;
   }
   endLive(s);
   const a = el("div", "advice");
-  a.append(el("span", "label done", "advisor"), el("span", "spin"), el("span", "txt", `Asking ${shortModel(info.models.advisor)} for advice…`));
-  append(s, a);
+  a.append(el("span", "k", "Advisor"), el("span", "spin"), el("span", "txt", `asking ${shortModel(info.models.advisor)}…`));
+  logAppend(s, a);
 }
 function addNote(s, text, cls = "") {
   append(s, el("div", `note ${cls}`, text));
@@ -432,6 +458,7 @@ function markAnswered(s, id, answers) {
 function clearView(s) {
   s.live = null;
   s.lastAgent = null;
+  s.logInner = null;
   s.agents.clear();
   s.context = null;
   [...s.view.children].forEach((n) => n !== s.empty && n.remove());
@@ -439,8 +466,9 @@ function clearView(s) {
 }
 function renderHistory(s, items) {
   clearView(s);
+  s.replaying = true;
   for (const it of items) {
-    if (it.role === "user") addUser(s, it.text, undefined, false, it.change);
+    if (it.role === "user") addUser(s, it.text, undefined, false, it.change, false);
     else if (it.role === "assistant") addAssistant(s, it.text);
     else if (it.role === "agent") {
       const [agent, ...rest] = it.text.split(": ");
@@ -451,6 +479,7 @@ function renderHistory(s, items) {
     }
   }
   finishAgents(s);
+  s.replaying = false;
   s.view.scrollTop = s.view.scrollHeight;
 }
 
@@ -548,6 +577,7 @@ function syncToolbar() {
   $("chatTitle").textContent = chat ? s.info.title : s.title;
   if (chat) {
     $("verifyBtn").classList.toggle("on", s.info.verify);
+    $("modelMark").classList.toggle("gpt", isGpt(s.info.model));
     $("verifyBtn").hidden = s.info.kind === "gpt";
     $("forkBtn").hidden = s.info.kind === "gpt";
     $("modelSelect").value = s.info.model;
@@ -562,11 +592,12 @@ function setBusyUi(b) {
   $("stopBtn").hidden = !b;
   $("composer").classList.toggle("running", b);
   $("hint").textContent = b
-    ? "Working · ⌘Enter or /change corrects it now without stopping · Enter queues"
-    : "Enter to send · Shift+Enter new line · / for commands";
+    ? "working · ⌘↵ corrects it now · ↵ queues for after"
+    : "↵ send · ⇧↵ new line · / commands";
 }
 function miniGrid(ctx) {
   const g = el("span", "mini-grid");
+  g.style.gridTemplateColumns = "repeat(20, 5px)";
   // Squeeze the 100-square grid into 20 (each mini square = 5% of the window).
   const cells = (ctx?.grid ?? []).flat();
   const shown = Array.from({ length: 20 }, (_, i) => {
@@ -589,44 +620,60 @@ function miniGrid(ctx) {
   }
   return g;
 }
+/** Number ticker (after Magic UI): values roll to their new number instead of jumping. */
+const tickers = new Map();
+function tickTo(node, key, value, format) {
+  const from = tickers.get(key) ?? value;
+  tickers.set(key, value);
+  if (from === value) return (node.textContent = format(value));
+  const t0 = performance.now();
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / 600);
+    const e = 1 - Math.pow(1 - k, 3);
+    node.textContent = format(Math.round(from + (value - from) * e));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
 function renderStatus() {
   const s = cur();
   const folder = (info?.workspace ?? "").split(/[\\/]/).pop();
-  $("sbFolder").textContent = "";
-  $("sbFolder").append(icon("folder"), el("span", "", folder));
-  $("crumbFolder").textContent = folder;
+  $("wsName").textContent = folder || "…";
+  $("sbFolder").title = `${info?.workspace ?? ""}\nClick to change the folder the agents work in`;
   const chat = s?.type === "chat";
-  $("sbModel").hidden = !chat;
-  $("sbVerify").hidden = !chat || s.info.kind === "gpt";
-  if (chat) {
-    $("sbModel").textContent = shortModel(s.info.model);
-    $("sbVerify").textContent = `Verifier ${s.info.verify ? "on" : "off"}`;
-  }
-  const running = [...tabs.values()].filter((t) => t.type === "chat" && t.info.busy).length;
-  $("sbTasks").textContent = running ? `${running} running` : "";
-  // context grid
+  // context
   const sc = $("sbContext");
   sc.textContent = "";
-  sc.hidden = !chat;
-  if (chat) {
-    sc.append(miniGrid(s.context), el("span", "", s.context ? `${s.context.percentage}% · ${fmtTokens(s.context.total)}/${fmtTokens(s.context.max)}` : "Context"));
-  }
-  // Claude usage
+  const ctx = chat ? s.context : null;
+  const cv = el("span", "v");
+  sc.append(el("span", "k", "Context"), miniGrid(ctx), cv);
+  if (ctx) tickTo(cv, "ctx", ctx.percentage, (n) => `${n}%`);
+  else cv.textContent = chat && s.info.kind === "gpt" ? "n/a" : "—";
+  sc.title = ctx ? `${fmtTokens(ctx.total)} of ${fmtTokens(ctx.max)} tokens. Click for the breakdown.` : "Context window (/context)";
+  // Claude plan usage
   const su = $("sbUsage");
   su.textContent = "";
   const w = usageState?.usage?.windows?.find((x) => x.key === "five_hour") ?? usageState?.usage?.windows?.[0];
+  const uv = el("span", "v");
+  const line = el("span", "meter-line");
+  const fill = el("i");
+  line.appendChild(fill);
+  su.append(el("span", "k", "Claude"), line, uv);
   if (w && w.utilization != null) {
     const pct = Math.round(w.utilization * 100);
-    const bar = el("span", `mini-bar${pct >= 100 ? " bad" : pct >= 80 ? " warn" : ""}`);
-    const fill = el("i");
     fill.style.width = `${Math.min(100, pct)}%`;
-    bar.appendChild(fill);
-    su.append(el("span", "", "Claude"), bar, el("span", "", `${pct}%`));
-    su.className = `sb${usageState.limited ? " bad" : pct >= 80 ? " warn" : ""}`;
-  } else su.append(el("span", "", info?.subscriptionOnly === false ? "Claude · API" : "Claude"));
+    tickTo(uv, "usage", pct, (n) => `${n}%`);
+    su.className = `inst${usageState.limited ? " bad" : pct >= 80 ? " warn" : ""}`;
+    su.title = `${w.label}: ${pct}%${w.resetsAt ? `, resets ${fmtTime(w.resetsAt)}` : ""}. Click for details.`;
+  } else uv.textContent = info?.subscriptionOnly === false ? "API" : "—";
+  // ChatGPT
   const sg = $("sbGpt");
   sg.textContent = "";
-  sg.append(el("span", `dot ${info?.codex?.ok ? "ok" : "warn"}`), el("span", "", "ChatGPT"));
+  const gv = el("span", "v", info?.codex?.ok ? "ready" : "sign in");
+  const dotWrap = el("span");
+  dotWrap.append(el("span", `dot ${info?.codex?.ok ? "ok" : "warn"}`));
+  sg.append(el("span", "k", "ChatGPT"), dotWrap, gv);
+  sg.title = info?.codex?.detail ?? "";
 }
 function buildModelSelect() {
   const sel = $("modelSelect");
@@ -669,8 +716,7 @@ $("sbGpt").onclick = () => showUsage();
 const PANES = { chats: "Chats", docs: "Documents", memory: "Memory", connections: "MCP servers & apps", team: "Team" };
 function setPane(p) {
   pane = p;
-  document.querySelectorAll(".act[data-pane]").forEach((b) => b.classList.toggle("active", b.dataset.pane === p));
-  $("paneTitle").textContent = PANES[p];
+  document.querySelectorAll(".seg[data-pane]").forEach((b) => b.classList.toggle("active", b.dataset.pane === p));
   $("paneSearch").value = "";
   $("paneSearch").placeholder = p === "docs" ? "Search documents" : p === "chats" ? "Search chats (⌘K)" : "Filter";
   renderPane();
@@ -678,7 +724,8 @@ function setPane(p) {
   if (p === "connections" && !connState.length) refreshConnections();
   if (p === "memory") refreshMemory();
 }
-document.querySelectorAll(".act[data-pane]").forEach((b) => (b.onclick = () => setPane(b.dataset.pane)));
+document.querySelectorAll(".seg[data-pane]").forEach((b) => (b.onclick = () => setPane(b.dataset.pane)));
+$("newTaskBtn").onclick = () => newTab();
 $("paneSearch").oninput = () => renderPane();
 $("statusAct").onclick = () => showStatus();
 
@@ -880,15 +927,15 @@ async function newChatInTab() {
 function renderSummary(box, sum, prd) {
   box.textContent = "";
   const top = el("div", "s-top");
-  top.append(icon("list"), el("span", "", prd ? "PRD summary" : "Summary"), el("span", "meta-r", `${shortModel(sum.model)} · ${fmtTime(sum.at)}`));
+  top.append(el("span", "label-mono", prd ? "PRD in brief" : "In brief"), el("span", "meta-r label-mono", `${shortModel(sum.model)} · ${fmtTime(sum.at)}`));
   const b = el("div", "s-body");
   b.append(el("p", "tldr", sum.tldr));
   const list = (title, items) => {
     if (!items?.length) return;
-    b.append(el("h4", "", title));
-    const ul = el("ul");
-    for (const it of items) ul.append(el("li", "", it));
-    b.append(ul);
+    b.append(el("h4", "label-mono", title));
+    const ol = el("ol");
+    for (const it of items) ol.append(el("li", "", it));
+    b.append(ol);
   };
   list("Main points", sum.points);
   list(prd ? "Requirements" : "Must-haves & constraints", sum.requirements);
@@ -1060,7 +1107,7 @@ async function showContext() {
     }
   const right = el("div");
   const total = el("div", "ctx-total");
-  total.append(el("strong", "", `${ctx.percentage}%`), document.createTextNode(`${fmtTokens(ctx.total)} of ${fmtTokens(ctx.max)} tokens · ${shortModel(ctx.model)}`));
+  total.append(el("strong", "", `${ctx.percentage}% used`), document.createTextNode(`${fmtTokens(ctx.total)} of ${fmtTokens(ctx.max)} tokens on ${shortModel(ctx.model)}`));
   const legend = el("div", "ctx-legend");
   for (const c of ctx.categories.filter((c) => c.kind !== "deferred")) {
     const lg = el("div", "lg");
