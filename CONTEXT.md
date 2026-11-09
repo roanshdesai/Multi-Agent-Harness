@@ -72,7 +72,7 @@ Key SDK facts this project relies on (Agent SDK v0.3.x):
 
 ## Features (all shipped)
 
-Tabs (parallel tasks) · live terminal link · `/btw` · `/fork` (new window, or a new terminal window from the CLI) · `/change` (⌘Enter) · verifier · automatic advisor · `/subagents` (advisor designs, you approve) · Claude/GPT model picker per tab · image agent · `/usage` + automatic switch to GPT when Claude is out · agent questions (answer in app or terminal) · MCP servers & apps panel (`/connections`, `/mcp`, `/apps`) · Documents pane with PRD summaries (`/docs`, `/summarize`) · `/context` grid · memory viewers (claude-mem, Hindsight) · UI links library · evals · original UI (paper/ink palette, serif + mono type, log-style agent timeline, instrument panel).
+Tabs (parallel tasks) · live terminal link · `/btw` · `/fork` (new window, or a new terminal window from the CLI) · `/change` (⌘Enter) · verifier · automatic advisor · `/subagents` (advisor designs, you approve) · Claude/GPT model picker per tab · image agent · `/usage` + automatic switch to GPT when Claude is out · agent questions (answer in app or terminal) · MCP servers & apps panel (`/connections`, `/mcp`, `/apps`) · Documents pane with PRD summaries (`/docs`, `/summarize`) · `/context` grid · memory viewers (claude-mem, Hindsight) · UI links library · evals · original UI (dark graphite palette with one signal accent, sans + mono type, dense layout, log-style agent timeline, instrument panel) · remote MCP servers by URL in `harness.config.yaml` (Pally).
 
 ## How to test
 
@@ -97,9 +97,12 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 
 ## Open bugs
 
-- Minor: after a folder change, the welcome screen keeps the old folder name and "pick up where you left off" list until it re-renders (`desktop/renderer/app.js`).
+None known.
 
 Fixed in the last review:
+- "Claude usage is over" shown when it wasn't: a stale saved "rejected" snapshot (no reset time), or an extra-usage / single-model refusal, counted as out. Now it needs a future reset and a blocked plan window, and a successful reply clears it
+- hardcoded model names and memory ports in the UI text now come from the config
+- the start screen redraws after a folder change
 - changing the workspace with tabs open: each tab's Harness has a fixed `cwd`; `Host.setWorkspace` moves idle tabs (new Harness + engine, GPT included) and leaves busy tabs in their folder
 - two prompts at once in the terminal: a FIFO of pending asks; an answer from the app cancels only that question's prompt
 - race while switching to GPT: the engine is swapped before awaiting history, and messages sent meanwhile wait and go to GPT after the hand-off

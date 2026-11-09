@@ -60,5 +60,10 @@ export function buildExternalMcp(cfg: HarnessConfig): {
 
   add("playwright", [], { command: "npx", args: ["-y", "@playwright/mcp@latest", "--headless"] });
 
+  // Remote servers listed by URL in the config (e.g. `pally: https://agent.pally.com/mcp`).
+  // Sign-in, if the server needs it, shows up as "needs auth" in Connections.
+  for (const [name, v] of Object.entries(cfg.mcp))
+    if (typeof v === "string" && /^https?:\/\//.test(v) && !servers[name]) servers[name] = { type: "http", url: v };
+
   return { servers, skipped };
 }

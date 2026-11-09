@@ -96,55 +96,73 @@ function makeView(full = false) {
   viewsEl.appendChild(view);
   return view;
 }
-function greeting() {
-  const h = new Date().getHours();
-  return h < 5 ? "Working late." : h < 12 ? "Good morning." : h < 18 ? "Good afternoon." : "Good evening.";
-}
+// Empty tab: a compact readout of the team and recent work, not a greeting page.
 function welcome() {
   const w = el("div", "welcome");
-  const folder = (info?.workspace ?? "").split(/[\\/]/).pop() || "this folder";
-  const mine = agents.filter((a) => a.custom).length;
-  w.append(
-    el("div", "kicker label-mono", `${folder} · ${new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}`),
-    el("h2", "", greeting()),
-    el("p", "lede", `Describe a task. ${shortModel(info?.models.main)} plans it and hands the pieces to the team: ${shortModel(info?.models.coder)} for code and hard calls, ${shortModel(info?.models.worker)} for research, ${shortModel(info?.models.image)} for images and ${shortModel(info?.models.gui)} for UI tests${mine ? `, plus your ${mine} subagent${mine === 1 ? "" : "s"}` : ""}.`),
-  );
-  const cols = el("div", "cols");
-  const starters = el("div");
-  starters.append(el("h3", "label-mono", "Start with"));
-  const items = [
-    ["Research", "Compare the animation libraries in my design library", "/research "],
-    ["Build", "A landing page hero with Magic UI components", "/code "],
-    ["Image", "An app icon: a node graph on warm paper", "/image "],
-    ["Team", "Suggest subagents for this project", "/subagents "],
+  const path = info?.workspace ?? "";
+  const head = el("div", "w-head");
+  head.append(el("span", "label-mono", "Ready"), el("span", "w-path mono", path));
+  w.append(head);
+
+  const m = info?.models ?? {};
+  const roster = el("div", "roster");
+  const roles = [
+    ["Plans", m.main],
+    ["Code + review", m.coder],
+    ["Research", m.worker],
+    ["Images", m.image],
+    ["UI tests", m.gui],
   ];
-  items.forEach(([k, t, p], i) => {
+  for (const a of agents.filter((x) => x.custom)) roles.push([a.name, a.runsOn?.split(" ")[0] ?? a.model ?? m.main]);
+  for (const [role, model] of roles) {
+    if (!model) continue;
+    const r = el("div", "r-row");
+    r.append(el("span", `mark${/^gpt-/i.test(model) ? " gpt" : ""}`), el("span", "r-role", role), el("span", "r-model mono", shortModel(model)));
+    roster.append(r);
+  }
+
+  const cols = el("div", "cols");
+  const start = el("div", "w-col");
+  start.append(el("h3", "label-mono", "Quick start"));
+  const items = [
+    ["/research", "Research a question", "/research "],
+    ["/code", "Build or fix something", "/code "],
+    ["/image", "Make an image", "/image "],
+    ["/subagents", "Suggest subagents for this project", "/subagents "],
+  ];
+  for (const [cmd, label, p] of items) {
     const b = el("button", "starter");
-    const txt = el("span", "txt");
-    txt.append(document.createTextNode(t), el("small", "", k));
-    b.append(el("span", "num", String(i + 1).padStart(2, "0")), txt);
+    b.append(el("code", "", cmd), el("span", "txt", label));
     b.onclick = () => {
       if (p === "/subagents ") return showSubagents();
-      input.value = p + t;
+      input.value = p;
       autoSize();
       input.focus();
     };
-    starters.append(b);
-  });
-  const recent = el("div");
-  recent.append(el("h3", "label-mono", "Pick up where you left off"));
-  if (!allChats.length) recent.append(el("p", "muted", "Nothing yet in this workspace."));
-  allChats.slice(0, 4).forEach((c, i) => {
+    start.append(b);
+  }
+  const recent = el("div", "w-col");
+  recent.append(el("h3", "label-mono", "Recent"));
+  if (!allChats.length) recent.append(el("p", "muted", "No chats in this folder yet."));
+  for (const c of allChats.slice(0, 6)) {
     const b = el("button", "starter");
-    const txt = el("span", "txt");
-    txt.append(document.createTextNode(c.title || "Untitled"), el("small", "", `${groupLabel(c.updated)}${c.kind === "gpt" ? " · GPT" : ""}`));
-    b.append(el("span", "num", String(i + 1).padStart(2, "0")), txt);
+    b.append(el("span", `mark${c.kind === "gpt" ? " gpt" : ""}`), el("span", "txt", c.title || "Untitled"), el("small", "", groupLabel(c.updated)));
     b.onclick = () => openChat(c);
     recent.append(b);
-  });
-  cols.append(starters, recent);
-  w.append(cols);
+  }
+  cols.append(start, recent);
+  w.append(roster, cols);
   return w;
+}
+/** Redraw every empty tab's start screen (after the folder, chats or agents change). */
+function refreshWelcomes() {
+  for (const s of tabs.values())
+    if (s.type === "chat" && s.empty) {
+      const fresh = welcome();
+      fresh.hidden = s.empty.hidden;
+      s.empty.replaceWith(fresh);
+      s.empty = fresh;
+    }
 }
 function ensureChatTab(t) {
   let s = tabs.get(t.id);
@@ -1434,8 +1452,9 @@ $("sbFolder").onclick = async () => {
   info.workspace = ws;
   for (const s of tabs.values()) if (s.type === "chat" && !s.info.busy) clearView(s);
   renderStatus();
-  refreshChats();
+  await refreshChats();
   refreshDocs();
+  refreshWelcomes();
 };
 
 // ── composer & commands ────────────────────────────────────────────────────
@@ -1617,13 +1636,7 @@ async function start() {
   for (const t of info.tabs) ensureChatTab(t);
   activate(info.tabs[info.tabs.length - 1].id);
   await Promise.all([refreshDocs(), refreshMemory(), refreshUsage(), refreshAgents()]);
-  for (const s of tabs.values())
-    if (s.type === "chat" && s.empty) {
-      const fresh = welcome();
-      fresh.hidden = s.empty.hidden;
-      s.empty.replaceWith(fresh);
-      s.empty = fresh;
-    }
+  refreshWelcomes();
   renderPane();
   autoSize();
   void refreshConnections();

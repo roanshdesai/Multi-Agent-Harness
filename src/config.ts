@@ -27,7 +27,8 @@ export interface HarnessConfig {
   design_library: string;
   plugins_dir: string;
   chats_dir: string;
-  mcp: Record<string, boolean>;
+  /** true/false toggles a built-in server; a URL adds a remote (HTTP) MCP server under that name. */
+  mcp: Record<string, boolean | string>;
   auth: { subscription_only: boolean };
   memory: { claude_mem: string[]; hindsight: string[] };
   advisor: { auto: boolean };

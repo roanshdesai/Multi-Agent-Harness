@@ -43,8 +43,8 @@ Each MCP server is only loaded once its keys are in `.env`. `/status` shows whic
 ## Desktop app
 
 Its own look, built to read like a document and an instrument:
-- **Type:** a serif for titles and your prompts, a sans-serif for replies, and monospace for small labels and numbers.
-- **Colour:** warm paper and ink. Each model family gets one quiet mark: clay for Claude, moss for GPT, plum for the advisor.
+- **Type:** a sans-serif for prose and monospace for anything that is data: models, counts, paths, labels.
+- **Colour:** dark graphite with one cool signal accent for focus and primary actions. Each model family gets one quiet mark: clay for Claude, moss for GPT, plum for the advisor. Dense spacing, hairline rules, no gradients, glows or glass.
 - **Agent work:** shown as a timeline on a thin line, not as boxes.
 - **Sidebar:** the workspace, then text-label sections (Chats · Docs · Memory · Apps · Team), with an instrument panel at the bottom showing the context grid, Claude usage and ChatGPT.
 - **References:** GitHub, VS Code and Vercel informed how it works, not how it looks.
