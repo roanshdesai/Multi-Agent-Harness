@@ -117,6 +117,11 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 - Listing cloud (claude.ai/code) sessions inside the app: the SDK has no API for it, so the Chats pane links out.
 - `/computer` from inside the running app (verified through the same code path from the terminal; the app open on the Mac was an older build).
 
+## Fixed after the Mac check (2026-11-09)
+
+- The packaged app showed no Hindsight dot and agents had no Hindsight address: `~/.agent-harness/harness.config.yaml` was an early copy without `memory:` (or `computer_use:`, `extensions:`, `remote:`). The packaged app now fills missing settings from its bundled config (`loadConfig(root, defaultsFile)`, `withDefaults`); the user's values and lists win, and the file isn't rewritten. The owner confirmed Hindsight opens in the app.
+- Opening the app while a copy ran without a window (macOS keeps it alive) quit the new copy and showed nothing. The running copy now opens a window on `second-instance`.
+
 ## Open bugs
 
 None known.
@@ -149,7 +154,7 @@ Fixed in the last review:
 
 ## Repo & branch
 
-- GitHub: `roanshdesai/test` (to be renamed `multi-agent-harness` under Settings → General; GitHub redirects the old URL).
+- GitHub: `roanshdesai/Multi-Agent-Harness` (renamed from `roanshdesai/test`; GitHub redirects the old URL).
 - `main` has everything. `claude/agent-harness-model-routing-wun9p7` (draft PR #1) is kept identical to it.
 - GitHub's default branch is still the work branch: switch it to `main` under Settings → General → Default branch.
 - On the owner's Mac the clone is a folder named `agent-harness`; the app's data folder is `~/.agent-harness` (logs in `~/.agent-harness/out/`, settings state in `~/.agent-harness/.harness/`).
