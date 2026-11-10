@@ -14,6 +14,7 @@ import type { HarnessConfig } from "./config.js";
 import { buildAgents } from "./agents.js";
 import { designPrompt, normalize, SUBAGENT_SCHEMA, type CustomSubagent } from "./subagents.js";
 import { buildExternalMcp } from "./mcp.js";
+import { instinctsBlock, OBSERVATION_SCHEMA, type Observation } from "./instincts.js";
 import { designLibraryTool } from "./tools/design-library.js";
 import { computerUseTool } from "./tools/computer.js";
 import { guiTestTool } from "./tools/gui-test.js";
@@ -256,7 +257,8 @@ export class Harness {
       model: this.mainModel,
       fallbackModel: cfg.models.fallback.join(","),
       effort: cfg.effort.main,
-      systemPrompt: { type: "preset", preset: "claude_code", append: ORCHESTRATOR_PROMPT },
+      // Plus what it has learned about how the user works in this project (instincts.ts).
+      systemPrompt: { type: "preset", preset: "claude_code", append: ORCHESTRATOR_PROMPT + instinctsBlock(cfg, this.cwd) },
       agents: buildAgents(cfg),
       // Hindsight is scoped to this harness's folder: each project has its own memory bank.
       mcpServers: { harness: local, ...buildExternalMcp(cfg, { cwd: this.cwd }).servers, ...loadCustomServers(cfg) },
@@ -333,6 +335,30 @@ export class Harness {
   }
 
   /** Run one prompt to completion, streaming messages to the hooks. */
+  /** One self-learning pass over a chunk of conversation: a cheap model, no tools, structured lessons back. */
+  async extractLessons(prompt: string): Promise<Observation[]> {
+    const r = await this.run(prompt, {
+      model: this.cfg.learning?.model ?? "claude-haiku-5-5",
+      effort: "low",
+      persistSession: false,
+      agents: {},
+      tools: [],
+      mcpServers: {},
+      // No user settings, plugins or hooks: Hindsight/claude-mem hooks would otherwise fire on every pass.
+      settingSources: [],
+      plugins: [],
+      hooks: {},
+      settings: {},
+      extraArgs: {},
+      systemPrompt: "You extract lessons about how a developer wants work done. Reply only with the structured result.",
+      outputFormat: { type: "json_schema", schema: OBSERVATION_SCHEMA as unknown as Record<string, unknown> },
+      maxTurns: 2,
+    });
+    const out = r.structured as { lessons?: Observation[] } | undefined;
+    if (!out) throw new Error(r.isError ? r.text : "No lessons came back.");
+    return Array.isArray(out.lessons) ? out.lessons : [];
+  }
+
   async run(prompt: string, opts: Partial<Options>, hooks: TurnHooks = {}): Promise<TurnResult> {
     // Streaming input keeps the task open to corrections while it runs.
     const input = inputChannel();

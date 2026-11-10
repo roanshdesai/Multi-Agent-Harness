@@ -13,6 +13,8 @@ let docs = [];
 let agents = [];
 let connState = [];
 let memStatus = null;
+/** Lessons learned about how you work (self-learning), for the current project and all projects. */
+let learned = null;
 let usageState = null;
 let slashIndex = 0;
 let pane = "projects";
@@ -1336,6 +1338,7 @@ function renderPane() {
       r.onclick = () => openMemory(key);
       body.appendChild(r);
     }
+    renderLearned(body, match);
   } else if (pane === "connections") {
     paneActions([["refresh", "Check again", () => refreshConnections()], ["plus", "Add a server", () => showConnections(true)]]);
     const apps = accountRows();
@@ -1404,7 +1407,7 @@ async function refreshDocs() {
   if (pane === "docs") renderPane();
 }
 async function refreshMemory() {
-  memStatus = await api.memoryStatus();
+  [memStatus, learned] = await Promise.all([api.memoryStatus(), api.instincts().catch(() => null)]);
   if (pane === "memory" || pane === "connections") renderPane();
 }
 async function refreshConnections(reconnect) {
@@ -2063,6 +2066,80 @@ $("sbFolder").onclick = async () => {
   const ws = await api.pickWorkspace();
   if (ws) await workspaceChanged(ws);
 };
+
+// ── learned (self-learning) ────────────────────────────────────────────────
+const pct = (x) => `${Math.round((x ?? 0) * 100)}%`;
+function renderLearned(body, match) {
+  if (!learned) return;
+  const all = [...learned.project.map((i) => ({ ...i, where: "this project" })), ...learned.global.map((i) => ({ ...i, where: "all projects" }))]
+    .filter((i) => match(i.trigger) || match(i.action))
+    .sort((a, b) => b.effective - a.effective);
+  section(body, "memory:learned", "Learned", all.length, () => {
+    if (!learned.enabled) return body.appendChild(el("div", "empty-pane", "Learning is off (learning.enabled in harness.config.yaml)."));
+    if (!all.length) body.appendChild(el("div", "empty-pane", "Nothing yet. It learns from your corrections and habits in this project's chats, a few minutes after a chat goes quiet."));
+    for (const i of all) {
+      const r = el("button", `row learned-row${i.effective >= 0.7 ? " strong" : ""}`);
+      const st = el("span", "stack");
+      st.append(el("span", "t", i.action), el("span", "sub", `${i.trigger} · ${i.where}`));
+      r.append(st, el("span", "rmeta", pct(i.effective)));
+      r.title = `${i.trigger}\n→ ${i.action}\n\nConfidence ${pct(i.effective)} (used in new chats at 70% and up) · seen ${i.hits}×${i.evidence?.length ? `\n\nFrom: “${i.evidence.at(-1)}”` : ""}`;
+      r.onclick = () => editLearned(i);
+      body.appendChild(r);
+    }
+    const foot = el("div", "pane-note");
+    const last = learned.running ? "Learning now…" : learned.last ? (learned.last.error ? `Last pass failed: ${learned.last.error}` : `Last pass ${fmtTime(learned.last.at)}: read ${learned.last.read} chat${learned.last.read === 1 ? "" : "s"}, ${learned.last.lessons} lesson${learned.last.lessons === 1 ? "" : "s"}.`) : "Learns a few minutes after a chat goes quiet.";
+    const now = el("button", "link-btn", "Learn now");
+    now.onclick = async () => {
+      now.disabled = true;
+      learned.running = true;
+      renderPane();
+      await api.learnNow();
+      await refreshMemory();
+    };
+    foot.append(document.createTextNode(`${last} `), now);
+    body.appendChild(foot);
+  });
+}
+function editLearned(i) {
+  const box = el("div", "sub-form project-form");
+  const field = (label, input, hint) => {
+    const f = el("label", "field");
+    f.append(el("span", "field-k", label), input);
+    if (hint) f.append(el("span", "field-hint", hint));
+    box.appendChild(f);
+    return input;
+  };
+  const trig = field("When", el("input", "input"));
+  trig.value = i.trigger;
+  const act = field("Do this", el("textarea", "input"));
+  act.value = i.action;
+  const conf = field("Confidence", el("input", "input mono"), "Lessons at 70% and up are given to every new chat. Up to 90%.");
+  Object.assign(conf, { type: "number", min: "0", max: "0.9", step: "0.1", value: String(Math.round(i.effective * 10) / 10) });
+  const scope = field("Applies to", el("select", "input"));
+  for (const [v, t] of [["project", "This project"], ["global", "All projects"]]) scope.appendChild(Object.assign(document.createElement("option"), { value: v, textContent: t }));
+  scope.value = i.scope;
+  if (i.evidence?.length) {
+    box.appendChild(el("span", "field-k", "Learned from"));
+    for (const e of i.evidence.slice(-3)) box.appendChild(el("p", "muted", `“${e}”`));
+  }
+  const acts = el("div", "row-actions");
+  const save = el("button", "btn primary", "Save");
+  const del = el("button", "btn danger", "Forget it");
+  acts.append(save, del);
+  box.appendChild(acts);
+  const { where, effective, ...plain } = i;
+  save.onclick = async () => {
+    await api.saveInstinct({ ...plain, trigger: trig.value.trim() || i.trigger, action: act.value.trim() || i.action, confidence: Math.min(0.9, Math.max(0, Number(conf.value) || 0)), scope: scope.value, last_seen: Date.now() });
+    $("modal").hidden = true;
+    refreshMemory();
+  };
+  del.onclick = async () => {
+    await api.saveInstinct(plain, true);
+    $("modal").hidden = true;
+    refreshMemory();
+  };
+  modal("Learned", box);
+}
 
 // ── projects ───────────────────────────────────────────────────────────────
 function findProject(list, path) {

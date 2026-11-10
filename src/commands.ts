@@ -40,6 +40,7 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
 
   { name: "/agents", description: "Show the team and their models", group: "Harness" },
   { name: "/docs", args: "[file]", description: "Documents in the project; open one", group: "Harness" },
+  { name: "/learned", args: "[now]", description: "What it has learned about how you work; 'now' learns from recent chats", group: "Harness" },
   { name: "/summarize", args: "<file>", description: "Main points of a document (PRDs get requirements and open questions)", group: "Harness" },
   { name: "/usage", description: "Claude plan usage (5-hour and weekly) and ChatGPT status", group: "Harness" },
   { name: "/connections", description: "MCP servers and apps: status, reconnect, turn off, add", group: "Harness", aliases: ["/mcp", "/apps"] },

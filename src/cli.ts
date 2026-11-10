@@ -647,6 +647,21 @@ async function command(line: string): Promise<boolean> {
       console.log(hits.map((h) => `- ${h.title}  ${c.dim(h.url)}${h.section ? c.dim(`  [${h.section}]`) : ""}`).join("\n") || c.dim("No matches."));
       return true;
     }
+    case "/learned": {
+      const { learn, loadInstincts, effective } = await import("./instincts.js");
+      const { bankFor } = await import("./projects.js");
+      if (arg.trim() === "now") {
+        console.log(c.dim("Reading recent chats…"));
+        const r = await learn(cfg, (p) => harness.extractLessons(p));
+        console.log(c.dim(`Read ${r.read} chat(s), ${r.lessons} lesson(s)${r.promoted.length ? `, promoted to all projects: ${r.promoted.join(", ")}` : ""}.`));
+      }
+      const { project, global } = loadInstincts(cfg, bankFor(cfg, harness.cwd));
+      const rows = [...project.map((i) => [i, "project"] as const), ...global.map((i) => [i, "all"] as const)].sort((a, b) => effective(b[0]) - effective(a[0]));
+      if (!rows.length) console.log(c.dim("Nothing learned yet in this project. It learns a few minutes after a chat goes quiet (in the app), or run /learned now."));
+      for (const [i, where] of rows) console.log(`${String(Math.round(effective(i) * 100)).padStart(3)}%  ${i.trigger} → ${i.action}  ${c.dim(`[${where}]`)}`);
+      if (rows.length) console.log(c.dim("Lessons at 70% and up are given to every new chat. Edit or delete them in the app (Memory → Learned)."));
+      return true;
+    }
     case "/eval":
       await runEvals(harness, arg, (l) => console.log(/^PASS/.test(l) ? c.green(l) : /^FAIL/.test(l) ? c.red(l) : l));
       return true;

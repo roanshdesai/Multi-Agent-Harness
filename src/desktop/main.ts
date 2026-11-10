@@ -19,6 +19,7 @@ import { RemoteControl } from "../remote.js";
 import { runComputerUse, COMPUTER_TEST_PROMPT } from "../tools/computer.js";
 import { parseCaffeinate, type CaffeinateStatus } from "../caffeinate.js";
 import { claudeMemUrls, startClaudeMem, claudeMemDoctor, startHindsight } from "../memory.js";
+import { learn, loadInstincts, saveInstinct, effective, type Instinct } from "../instincts.js";
 import { loadProjects, saveProjects, flattenProjects, projectFor, bankFor, defaultBank, bankPageUrl, folderExists, type Project, type ProjectsFile } from "../projects.js";
 import { listDocs, readDoc, summarizeDoc, cachedSummary } from "../docs.js";
 
@@ -301,6 +302,38 @@ ipcMain.handle("project-open", (_e, dir: string) => {
   if (!folderExists(dir)) throw new Error(`That folder doesn't exist any more: ${dir}`);
   return useWorkspace(dir);
 });
+// Self-learning: every few minutes, read quiet chats from the owner's projects and update the lessons.
+let learning = false;
+let lastLearn: { at: number; read: number; lessons: number; promoted: string[]; error?: string } | null = null;
+async function runLearning() {
+  if (learning || cfg.learning?.enabled === false) return lastLearn;
+  learning = true;
+  try {
+    const h = new Harness(cfg, askFor(0), cfg.root);
+    lastLearn = { at: Date.now(), ...(await learn(cfg, (prompt) => h.extractLessons(prompt))) };
+  } catch (err) {
+    lastLearn = { at: Date.now(), read: 0, lessons: 0, promoted: [], error: (err as Error).message };
+  } finally {
+    learning = false;
+  }
+  return lastLearn;
+}
+void app.whenReady().then(() => {
+  if (cfg.learning?.enabled === false) return;
+  setTimeout(() => void runLearning(), 2 * 60_000);
+  setInterval(() => void runLearning(), Math.max(2, cfg.learning?.every_minutes ?? 10) * 60_000);
+});
+ipcMain.handle("instincts", () => {
+  const bank = bankFor(cfg, process.cwd());
+  const { project, global } = loadInstincts(cfg, bank);
+  const view = (i: Instinct) => ({ ...i, effective: effective(i) });
+  return { bank, project: project.map(view), global: global.map(view), last: lastLearn, running: learning, enabled: cfg.learning?.enabled !== false };
+});
+ipcMain.handle("instinct-save", (_e, inst: Instinct, remove?: boolean) => {
+  saveInstinct(cfg, bankFor(cfg, process.cwd()), inst, !!remove);
+  return true;
+});
+ipcMain.handle("learn-now", () => runLearning());
 ipcMain.handle("pick-folder", async (e) => {
   const win = windows.get(wid(e.sender));
   const r = await dialog.showOpenDialog(win!, { properties: ["openDirectory"], defaultPath: process.cwd() });

@@ -76,6 +76,17 @@ remote:
   # unless you also start the public tunnel. Fixed port so the link stays the same.
   port: 47615
 
+learning:
+  # Self-learning: a few minutes after a chat in one of your projects goes quiet,
+  # a cheap model reads your messages and keeps lessons about how you work
+  # (corrections, preferences, fixes). The strong ones go into every new chat.
+  # Memory → Learned in the app shows and edits them; /learned in the terminal.
+  enabled: true
+  model: claude-haiku-5-5
+  idle_minutes: 3      # how long a chat must be quiet before it's read
+  every_minutes: 10    # how often the app checks
+  since_days: 14       # older chats aren't read
+
 context:
   # When a chat's context window passes this share, write a hand-off summary
   # (context.md) and offer to continue in a new chat that starts from it.

@@ -474,3 +474,8 @@ body.platform-win.has-awake .titlebar, body.platform-linux.has-awake .titlebar {
 .field-k { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
 .field-hint { color: var(--ink-3); font-size: 11.5px; }
 .folder-pick { display: flex; gap: 8px; align-items: center; }
+.learned-row .t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.learned-row.strong .rmeta { color: var(--moss); }
+.link-btn { border: 0; background: none; padding: 0; color: var(--signal); font: inherit; cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
+.project-form textarea.input { min-height: 64px; resize: vertical; }

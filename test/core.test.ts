@@ -773,3 +773,73 @@ test("model stack: Fable 5.2 coordinates and advises; quick coder and CAD roles"
   assert.equal(older.cad.model, cfg.models.advisor);
   assert.equal(older["quick-coder"].model, cfg.models.worker);
 });
+
+test("instincts: learn from quiet project chats, confidence rules, promotion, and what new chats get", async () => {
+  const { loadConfig } = await import("../src/config.js");
+  const { saveProjects } = await import("../src/projects.js");
+  const I = await import("../src/instincts.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  cfg.learning = { enabled: true, idle_minutes: 3, since_days: 14 };
+  const proj = mkdtempSync(join(tmpdir(), "proj-"));
+  const other = mkdtempSync(join(tmpdir(), "other-"));
+  saveProjects(cfg, { groups: [{ name: "Personal", projects: [{ name: "P", path: proj, bank: "bank-p" }, { name: "Q", path: other, bank: "bank-q" }] }] });
+  // A Claude Code transcript for a session in the project, quiet for 10 minutes.
+  const home = mkdtempSync(join(tmpdir(), "claude-"));
+  const tdir = join(home, "projects", "-proj");
+  mkdirSync(tdir, { recursive: true });
+  const line = (type: string, content: unknown, extra = {}) => JSON.stringify({ type, cwd: proj, message: { content }, ...extra });
+  const tfile = join(tdir, "s1.jsonl");
+  writeFileSync(tfile, [
+    line("user", "<task-notification>noise</task-notification>"),
+    line("user", "no gradients please, keep the UI original"),
+    line("assistant", [{ type: "text", text: "Removed the gradient." }, { type: "tool_use", name: "Edit" }]),
+    line("user", [{ type: "tool_result", content: "ok" }]),
+    line("user", "subagent text", { isSidechain: true }),
+  ].join("\n"));
+  const { utimesSync } = await import("node:fs");
+  const old = new Date(Date.now() - 10 * 60_000);
+  utimesSync(tfile, old, old);
+  process.env.CLAUDE_CONFIG_DIR = home;
+  try {
+    const prompts: string[] = [];
+    const fake = async (p: string) => (prompts.push(p), [{ kind: "new", id: "no-gradients", trigger: "when building the desktop UI", action: "no gradients, glows or glass", evidence: "no gradients please", scope: "project" }] as any);
+    const r = await I.learn(cfg, fake);
+    assert.equal(r.read, 1);
+    assert.match(prompts[0], /USER: no gradients please/);
+    assert.doesNotMatch(prompts[0], /noise|subagent text|tool_result/); // only the owner's words and the agent's replies
+    let { project } = I.loadInstincts(cfg, "bank-p");
+    assert.equal(project[0].confidence, I.START);
+    assert.equal((await I.learn(cfg, fake)).read, 0); // already read; nothing new
+    assert.equal(I.instinctsBlock(cfg, proj), ""); // 0.4 is too weak to give to new chats
+    // Seen again three times: rises to 0.7 and is given to new chats.
+    for (let n = 0; n < 3; n++) I.applyObservations(cfg, "bank-p", [{ kind: "seen", id: "no-gradients" }]);
+    ({ project } = I.loadInstincts(cfg, "bank-p"));
+    assert.equal(Math.round(project[0].confidence * 10) / 10, 0.7);
+    assert.match(I.instinctsBlock(cfg, join(proj, "src")), /when building the desktop UI: no gradients, glows or glass/);
+    assert.equal(I.instinctsBlock(cfg, other), ""); // another project doesn't get it
+    // A correction drops it sharply and changes what to do.
+    I.applyObservations(cfg, "bank-p", [{ kind: "corrected", id: "no-gradients", action: "subtle gradients are fine on charts only" }]);
+    ({ project } = I.loadInstincts(cfg, "bank-p"));
+    assert.equal(Math.round(project[0].confidence * 10) / 10, 0.4);
+    assert.equal(project[0].action, "subtle gradients are fine on charts only");
+    // Unseen for two months: fades by 0.2.
+    assert.equal(I.effective({ ...project[0], confidence: 0.8, last_seen: Date.now() - 61 * 24 * 3600_000 }), 0.6);
+    // Strong in two projects → promoted to all projects.
+    for (const bank of ["bank-p", "bank-q"]) {
+      I.applyObservations(cfg, bank, [{ kind: "new", id: "plain-words", trigger: "when writing to the user", action: "plain words, no jargon", scope: "project" }]);
+      for (let n = 0; n < 5; n++) I.applyObservations(cfg, bank, [{ kind: "seen", id: "plain-words" }]);
+    }
+    assert.deepEqual(I.promote(cfg), ["plain-words"]);
+    assert.ok(I.loadInstincts(cfg, "bank-q").global.some((g) => g.id === "plain-words"));
+    assert.ok(!I.loadInstincts(cfg, "bank-q").project.some((g) => g.id === "plain-words"));
+    // At most 8 go into a new chat, strongest first.
+    for (let n = 0; n < 12; n++) I.saveInstinct(cfg, "bank-p", { id: `x${n}`, trigger: `t${n}`, action: `a${n}`, evidence: [], confidence: 0.7 + (n % 3) / 10, scope: "project", project: "bank-p", created: Date.now(), last_seen: Date.now(), hits: 1 });
+    assert.equal(I.strongInstincts(cfg, proj).length, I.INJECT_MAX);
+    assert.ok(I.strongInstincts(cfg, proj)[0].confidence >= 0.89);
+    cfg.learning.enabled = false;
+    assert.equal(I.instinctsBlock(cfg, proj), "");
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR;
+  }
+});
