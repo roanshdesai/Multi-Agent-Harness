@@ -13,10 +13,12 @@ One orchestrator plans and delegates to specialists on different models.
 
 | Role | Model | Notes |
 |---|---|---|
-| Orchestrator | `claude-opus-5-5` | Must delegate; doesn't do the work itself (prompt in `src/session.ts`) |
-| Advisor | `claude-fable-5-1` | Server-side advisor tool (`settings.advisorModel`): the working model consults it on its own. Also an `advisor` subagent as a backstop after 3 tool failures (`src/guards.ts`) |
+| Orchestrator | `claude-fable-5-2` | Must delegate; only coordinates (prompt in `src/session.ts`) |
+| Advisor | `claude-fable-5-2` | Server-side advisor tool (`settings.advisorModel`): the working model consults it on its own. Also an `advisor` subagent as a backstop after 3 tool failures (`src/guards.ts`) |
 | Designer | `claude-opus-5-5` | Own role (`models.designer`); falls back to the coder's model if unset |
 | Coder, verifier | `claude-fable-5-1` | The verifier checks delegated work on a throwaway fork (`Harness.verify`) |
+| Quick coder | `claude-sonnet-5-5` | `quick-coder` agent (`models.quick_coder`): mechanical, well-scoped edits, picked up front by the orchestrator |
+| 3D CAD | `claude-fable-5-2` | `cad` agent (`models.cad`): Onshape advice and FeatureScript saved under `./cad/` |
 | Researcher, summarizer, GUI-tester coordinator | `claude-sonnet-5-5` | |
 | GUI testing | `gpt-6-astra` via Codex CLI | `src/tools/gui-test.ts`; falls back to Playwright MCP |
 | Images | `gpt-6.1-sol` via Codex (falls back to `gpt-6-astra`) | `src/tools/gpt.ts` |

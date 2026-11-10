@@ -6,9 +6,11 @@ auth:
   subscription_only: true
 
 models:
-  main: claude-opus-5-5          # orchestrator
-  advisor: claude-fable-5-1      # second opinion, used when stuck
+  main: claude-fable-5-2         # orchestrator: only coordinates the subagents
+  advisor: claude-fable-5-2      # second opinion, used when stuck
   coder: claude-fable-5-1        # all coding work
+  quick_coder: claude-sonnet-5-5 # mechanical, well-scoped edits (cheaper)
+  cad: claude-fable-5-2          # 3D CAD: Onshape design advice and FeatureScript
   designer: claude-opus-5-5      # UI and visual design
   worker: claude-sonnet-5-5      # scraping, research, general tasks
   triage: claude-sonnet-5-5      # summarize / compress scraped content (upgraded from Haiku)
@@ -30,6 +32,8 @@ effort:
   coder: xhigh
   worker: medium
   verifier: high
+  cad: xhigh
+  quick_coder: low
 
 advisor:
   # Like Claude Code: the working model consults the advisor model (above) on its

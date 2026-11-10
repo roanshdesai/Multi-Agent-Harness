@@ -75,7 +75,7 @@ function modelFor(agent) {
   if (!info) return "";
   const m = info.models;
   if (info.runsOn?.[agent]) return shortModel(info.runsOn[agent].split(" ")[0]);
-  const map = { advisor: m.advisor, coder: m.coder, designer: m.coder, researcher: m.worker, summarizer: m.triage, video: m.video, verifier: m.verifier };
+  const map = { advisor: m.advisor, coder: m.coder, "quick-coder": m.quick_coder ?? m.worker, designer: m.designer ?? m.coder, cad: m.cad ?? m.advisor, researcher: m.worker, summarizer: m.triage, video: m.video, verifier: m.verifier };
   return shortModel(map[agent] || agents.find((a) => a.name === agent)?.model || "");
 }
 const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
@@ -1080,7 +1080,9 @@ const ROLE_LABELS = {
   main: ["Orchestrator", "Plans and delegates every task"],
   advisor: ["Advisor", "Second opinion when the work gets hard"],
   coder: ["Coder", "All coding work"],
+  quick_coder: ["Quick coder", "Mechanical, well-scoped edits (cheaper)"],
   designer: ["Designer", "UI and visual design"],
+  cad: ["3D CAD", "Onshape design advice and FeatureScript"],
   worker: ["Researcher", "Research, scraping, general tasks"],
   triage: ["Summarizer", "Condenses long pages and logs"],
   video: ["Video", "Video work"],

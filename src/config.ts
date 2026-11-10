@@ -15,6 +15,10 @@ export interface HarnessConfig {
     verifier: string;
     /** UI and visual design. Falls back to the coder's model when not set. */
     designer?: string;
+    /** 3D CAD (Onshape): design advice and FeatureScript. Falls back to the advisor's model. */
+    cad?: string;
+    /** Cheap coder for clearly mechanical edits. Falls back to the worker's model. */
+    quick_coder?: string;
     gui: string;
     image: string;
     image_fallback: string;
@@ -23,7 +27,7 @@ export interface HarnessConfig {
     /** Claude models offered in each tab's picker. Empty: everything your plan offers. */
     claude?: string[];
   };
-  effort: Record<"main" | "advisor" | "coder" | "worker" | "verifier", Effort>;
+  effort: Record<"main" | "advisor" | "coder" | "worker" | "verifier", Effort> & Partial<Record<"cad" | "quick_coder", Effort>>;
   stuck_after_failures: number;
   verify: { enabled: boolean; max_rounds: number };
   approvals: { github_push: "ask" | "allow" | "deny"; protected_branches: string[] };
@@ -71,7 +75,7 @@ export function loadDotEnv(root: string): void {
 }
 
 /** Model roles the app lets you change. */
-export const MODEL_ROLES = ["main", "advisor", "coder", "designer", "worker", "triage", "video", "verifier", "gui", "image", "image_fallback"] as const;
+export const MODEL_ROLES = ["main", "advisor", "coder", "quick_coder", "designer", "cad", "worker", "triage", "video", "verifier", "gui", "image", "image_fallback"] as const;
 export const MODEL_LISTS = ["gpt", "claude", "fallback"] as const;
 
 /**
@@ -136,6 +140,8 @@ export function loadConfig(root = process.env.HARNESS_ROOT ?? process.cwd(), def
   cfg.models.image_fallback ??= cfg.models.gui;
   cfg.models.gpt ??= [...new Set([cfg.models.gui, cfg.models.image].filter(Boolean))];
   cfg.models.fallback ??= [];
+  cfg.models.cad ??= cfg.models.advisor;
+  cfg.models.quick_coder ??= cfg.models.worker;
   cfg.memory ??= { claude_mem: [], hindsight: [] };
   cfg.advisor ??= { auto: true };
   cfg.limits ??= { fallback_to_gpt: true, warn_at: 0.8 };

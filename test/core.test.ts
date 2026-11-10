@@ -754,3 +754,22 @@ test("projects: groups and sub-projects, each folder with its own Hindsight bank
   assert.equal((buildExternalMcp(cfg, { cwd: glasses }).servers.hindsight as { url: string }).url, "http://localhost:8888/mcp/kee-glasses/");
   assert.equal((buildExternalMcp(cfg).servers.hindsight as { url: string }).url, "http://localhost:8888/mcp/"); // no folder: all banks
 });
+
+test("model stack: Fable 5.2 coordinates and advises; quick coder and CAD roles", async () => {
+  const { loadConfig, MODEL_ROLES } = await import("../src/config.js");
+  const { buildAgents } = await import("../src/agents.js");
+  const cfg = loadConfig(process.cwd());
+  assert.equal(cfg.models.main, "claude-fable-5-2");
+  assert.equal(cfg.models.advisor, "claude-fable-5-2");
+  assert.equal(cfg.models.coder, "claude-fable-5-1");
+  const team = buildAgents(cfg);
+  assert.equal(team["quick-coder"].model, cfg.models.quick_coder);
+  assert.equal(team.cad.model, cfg.models.cad);
+  assert.ok(MODEL_ROLES.includes("cad") && MODEL_ROLES.includes("quick_coder")); // editable in /models
+  // An older config without the new roles still gets them.
+  delete cfg.models.cad;
+  delete cfg.models.quick_coder;
+  const older = buildAgents(cfg);
+  assert.equal(older.cad.model, cfg.models.advisor);
+  assert.equal(older["quick-coder"].model, cfg.models.worker);
+});

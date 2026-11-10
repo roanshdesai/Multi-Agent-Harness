@@ -4,9 +4,11 @@ A desktop app (Mac, Windows, Linux) and terminal app built on the Claude Agent S
 
 | Role | Model | Used for |
 |---|---|---|
-| Orchestrator | Claude Opus 5.5 | Plans, delegates and combines the results. It doesn't do the work itself. |
-| Advisor | Claude Fable 5.1 | Consulted automatically, like in Claude Code: the working model asks it whenever it hits something hard. Also the backstop after 3 tool failures in a row, and `/advisor` asks it directly. |
-| Coder | Claude Fable 5.1 | All coding work |
+| Orchestrator | Claude Fable 5.2 | Plans, delegates and combines the results. It only coordinates; it doesn't do the work itself. |
+| Advisor | Claude Fable 5.2 | Consulted automatically, like in Claude Code: the working model asks it whenever it hits something hard. Also the backstop after 3 tool failures in a row, and `/advisor` asks it directly. |
+| Coder | Claude Fable 5.1 | Coding that needs working out |
+| Quick coder | Claude Sonnet 5.5 | Mechanical, well-scoped edits, to save usage |
+| 3D CAD | Claude Fable 5.2 | Onshape design advice and FeatureScript |
 | Designer | Claude Opus 5.5 | UI and visual design |
 | Researcher | Claude Sonnet 5.5 | Scraping, research and general tasks |
 | Summarizer | Claude Sonnet 5.5 | Shortens long pages and logs before the orchestrator reads them |
@@ -15,7 +17,7 @@ A desktop app (Mac, Windows, Linux) and terminal app built on the Claude Agent S
 | Video | Claude Opus 5.5 | ffmpeg and Remotion |
 | Verifier | Claude Fable 5.1 | Checks every delegated result before you see it, on a throwaway copy of the chat |
 
-If Opus is overloaded or unavailable, the orchestrator falls back to `claude-opus-5-5`, then `claude-sonnet-5-5` (set in `models.fallback`).
+If Fable 5.2 is overloaded or unavailable, the orchestrator falls back to `claude-opus-5-5`, then `claude-sonnet-5-5` (set in `models.fallback`).
 
 ## Billing: subscriptions only
 
