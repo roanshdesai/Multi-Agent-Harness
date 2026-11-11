@@ -1576,7 +1576,22 @@ async function openDoc(path) {
   const sumBox = el("div", "summary");
   sumBox.hidden = true;
   inner.appendChild(sumBox);
-  if (d.text == null) inner.appendChild(el("p", "doc-binary", `${d.ext.slice(1).toUpperCase()} file (${fmtTokens(d.size)}B). It can't be shown here, but Summarize can read it.`));
+  if (d.ext === ".pdf" && d.url) {
+    const f = el("iframe", "doc-pdf");
+    f.src = d.url;
+    f.title = name;
+    scroll.classList.add("doc-full");
+    inner.appendChild(f);
+  } else if (d.image && d.url) {
+    const img = el("img", "doc-image");
+    img.src = d.url;
+    img.alt = name;
+    inner.appendChild(img);
+  } else if (d.html) {
+    const b = el("div", "bubble doc-html");
+    b.innerHTML = DOMPurify.sanitize(d.html, { FORBID_TAGS: ["style", "script"], FORBID_ATTR: ["style"] });
+    inner.appendChild(b);
+  } else if (d.text == null) inner.appendChild(el("p", "doc-binary", `${d.ext.slice(1).toUpperCase()} file (${fmtTokens(d.size)}B). It can't be shown here, but Summarize can read it, or open it in its own app.`));
   else if ([".md", ".mdx", ".markdown"].includes(d.ext)) {
     const b = el("div", "bubble");
     b.innerHTML = md(d.text);
@@ -2577,6 +2592,37 @@ function addAttachments(paths) {
   for (const p of paths) if (p && !attachments.includes(p) && attachments.length < 20) attachments.push(p);
   renderAttachments();
   input.focus();
+  void pinToContext({ files: paths.filter(Boolean) });
+}
+/** Links in a piece of text (http/https), without trailing punctuation. */
+const linksIn = (text) => [...new Set((String(text).match(/https?:\/\/[^\s<>"'`)\]]+/g) ?? []).map((u) => u.replace(/[.,;:!?]+$/, "")))];
+/**
+ * Files and links you drop, attach, paste or send go into the project's context
+ * straight away (the context panel), so later chats in the project have them too.
+ */
+async function pinToContext({ files = [], links = [] }) {
+  if (!files.length && !links.length) return;
+  try {
+    const cur = await api.projectContext();
+    const have = new Set(cur.files.map((f) => f.path));
+    const haveL = new Set(cur.links.map((l) => l.url));
+    const newFiles = files.filter((f) => !have.has(f));
+    const newLinks = links.filter((u) => !haveL.has(u));
+    if (!newFiles.length && !newLinks.length) return;
+    await api.saveProjectContext({ files: [...cur.files.map((f) => f.path), ...newFiles], links: [...cur.links, ...newLinks.map((url) => ({ url }))] });
+    if (!$("ctxPanel").hidden) refreshContext();
+    flashContext(newFiles.length + newLinks.length);
+  } catch {
+    /* pinning is a convenience; the message still goes out */
+  }
+}
+/** A short sign on the context button that something was pinned. */
+function flashContext(n) {
+  const b = $("ctxBtn");
+  b.textContent = `context +${n}`;
+  b.classList.add("pinned");
+  clearTimeout(flashContext.t);
+  flashContext.t = setTimeout(() => ((b.textContent = "context"), b.classList.remove("pinned")), 2500);
 }
 /** A File from a drop or paste: its real path if it has one, otherwise saved to the data folder. */
 async function fileToPath(f) {
@@ -2588,7 +2634,8 @@ async function fileToPath(f) {
 $("attachBtn").onclick = async () => addAttachments(await api.pickFiles());
 const composerEl = $("composer");
 composerEl.addEventListener("dragover", (e) => {
-  if (![...(e.dataTransfer?.types ?? [])].includes("Files")) return;
+  const types = [...(e.dataTransfer?.types ?? [])];
+  if (!types.includes("Files") && !types.includes("text/uri-list")) return;
   e.preventDefault();
   composerEl.classList.add("drop");
 });
@@ -2596,13 +2643,20 @@ composerEl.addEventListener("dragleave", () => composerEl.classList.remove("drop
 composerEl.addEventListener("drop", async (e) => {
   composerEl.classList.remove("drop");
   const files = [...(e.dataTransfer?.files ?? [])];
-  if (!files.length) return;
+  if (!files.length) {
+    const links = linksIn(e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text") || "");
+    if (links.length) void pinToContext({ links });
+    return;
+  }
   e.preventDefault();
   addAttachments(await Promise.all(files.map(fileToPath)));
 });
 input.addEventListener("paste", async (e) => {
   const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter(Boolean);
-  if (!files.length) return; // plain text pastes as usual
+  if (!files.length) {
+    void pinToContext({ links: linksIn(e.clipboardData?.getData("text") ?? "") });
+    return; // the text pastes as usual
+  }
   e.preventDefault();
   addAttachments(await Promise.all(files.map(fileToPath)));
 });
@@ -2611,6 +2665,7 @@ async function submit(mode = "send") {
   const text = input.value.trim();
   const s = cur();
   if ((!text && !attachments.length) || s?.type !== "chat") return;
+  if (!text.startsWith("/")) void pinToContext({ links: linksIn(text) });
   // Files attached in the composer go with a normal message (not with commands).
   if (!text.startsWith("/") || !text) {
     const files = attachments.splice(0);
@@ -2677,7 +2732,6 @@ async function submit(mode = "send") {
     case "/remote":
       return showRemote();
     case "/handoff":
-      if (s.info.kind === "gpt") return addNote(s, "Hand-off works on Claude chats. This tab runs on GPT.");
       return api.handoff(s.id).catch((err) => addNote(s, err.message, "error"));
     case "/status":
       return showStatus();

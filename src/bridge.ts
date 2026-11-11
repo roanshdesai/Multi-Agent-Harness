@@ -11,8 +11,20 @@ import type { Host } from "./host.js";
  * named pipe on Windows. Messages are newline-delimited JSON.
  */
 export function bridgePath(): string {
+  if (process.env.HARNESS_BRIDGE) return process.env.HARNESS_BRIDGE; // tests and second copies use their own
   if (process.platform === "win32") return `\\\\.\\pipe\\agent-harness-${process.env.USERNAME ?? "user"}`;
   return join(homedir(), ".agent-harness", "bridge.sock");
+}
+
+/** Whether another running app already answers on the bridge (then this one mustn't take it over). */
+export function bridgeInUse(path = bridgePath(), timeoutMs = 600): Promise<boolean> {
+  return new Promise((resolve) => {
+    const s = createConnection(path);
+    const done = (v: boolean) => (s.destroy(), resolve(v));
+    s.once("connect", () => done(true));
+    s.once("error", () => done(false));
+    setTimeout(() => done(false), timeoutMs);
+  });
 }
 
 type Req = { id: number; op: string; [k: string]: unknown };

@@ -160,10 +160,10 @@ export class Host {
    */
   async cloud(tabId: string): Promise<{ note: string; url?: string; branch: string }> {
     const t = this.get(tabId);
-    if (!(t.engine instanceof ChatEngine)) throw new Error("/cloud works on Claude chats. This tab runs on GPT.");
     if (this.cloudOf(t)) throw new Error("This tab's task is already in the cloud. Use Continue here (or /cloud back) first.");
     if (t.engine.busy) await t.engine.stop().catch(() => {});
-    const h = await t.engine.handoff(false);
+    // Claude writes its hand-off on a throwaway fork; GPT writes its transcript. Either way the cloud gets a note.
+    const h = t.engine instanceof ChatEngine ? await t.engine.handoff(false) : await (t.engine as GptChat).handoff();
     if (!h) throw new Error("Nothing to send yet: start the task here first, then /cloud.");
     const ask = this.askFor(t.windowId);
     const r = await sendToCloud(this.cfg, t.harness.cwd, t.title || "Continue the task", h.text, ask, async (repo) =>
@@ -283,11 +283,10 @@ ${repo} is a public repository: anyone can read what's pushed. Include this proj
     }
   }
 
-  /** Write a hand-off summary (context.md) for this tab's chat now. Claude chats only. */
+  /** Write a hand-off summary (context.md) for this tab's chat now (Claude: on a fork; GPT: from the transcript). */
   async handoff(tabId: string) {
     const t = this.get(tabId);
-    if (!(t.engine instanceof ChatEngine)) throw new Error("Hand-off works on Claude chats. This tab runs on GPT.");
-    return t.engine.handoff(false);
+    return t.engine instanceof ChatEngine ? t.engine.handoff(false) : (t.engine as GptChat).handoff();
   }
 
   /**

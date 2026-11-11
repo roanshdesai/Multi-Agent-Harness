@@ -59,7 +59,11 @@ Its own look, built to read like a document and an instrument:
 
 **Documents:** the Documents pane lists the project's documents (.md, .txt, .pdf, .docx…), with the files the agents opened or edited this session first and PRDs grouped together. Opening one shows it in a tab. **Summarize** (or **Summarize PRD**) gives the main points: a TL;DR, key points, requirements, and open questions. It runs on Sonnet and is cached until the file changes. `/docs` and `/summarize <file>` do the same in the terminal.
 
-**Project context:** the **context** button by the model picker opens a side panel, like a Claude project's files and links. Pin files (choose or drop them) and links to the current project; every chat in it gets the list, and agents open what's relevant. Stored per project under `.harness/context/`.
+**Project context:** files and links you drop, attach, paste or send are pinned to the project automatically. The **context** button by the model picker opens a side panel, like a Claude project's files and links. Pin files (choose or drop them) and links to the current project; every chat in it gets the list, and agents open what's relevant. Stored per project under `.harness/context/`.
+
+**GPT tabs work like Claude tabs:** they get the project's pinned files and links, the learned lessons and the project's memory (Hindsight, as the `harness_memory` MCP server); their commands can use the network; Codex subagents show as agent cards; the status bar shows how full their context is; `/fork`, `/handoff` and `/cloud` work; and `/change` (⌘Enter) stops the current step and carries on with your correction right away.
+
+**Documents in the app:** PDFs open in the built-in viewer, Word files as formatted text, images as images, Markdown rendered. Files pinned to the project open too, even outside its folder.
 
 **Copy:** hover a message for **Copy** (replies copy as markdown); code blocks have their own copy button.
 

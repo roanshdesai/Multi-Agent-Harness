@@ -954,7 +954,7 @@ test("/fast: GPT tabs run Codex on the priority tier; Claude tabs say it isn't a
     assert.match(events.at(-1).text, /Fast mode on for gpt-6-astra/);
     host.send(gpt.id, "hello");
     await new Promise<void>((r) => { const t = setInterval(() => { if (!host.list().find((x) => x.id === gpt.id)!.busy && readFileSync(log, "utf8").includes("hello")) { clearInterval(t); r(); } }, 20); });
-    const args = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)).find((a) => a.includes("hello"));
+    const args = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)).find((a) => a.join(" ").includes("hello"));
     assert.ok(args.join(" ").includes('service_tier="priority"'));
     host.send(gpt.id, "/fast off");
     assert.equal(host.list().find((t) => t.id === gpt.id)!.fast, false);
@@ -1073,5 +1073,76 @@ test("near the Claude limit: a Claude tab's next message moves to GPT, with the 
   } finally {
     delete process.env.HARNESS_CODEX_BIN;
     delete process.env.FAKE_CODEX_LOG;
+  }
+});
+
+test("GPT tabs match Claude tabs: notes, memory, network, subagents, context, fork, mid-task corrections", async () => {
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "par-"));
+  const log = join(dir, "codex.log");
+  process.env.FAKE_CODEX_LOG = log;
+  const { readFileSync } = await import("node:fs");
+  const { GptChat } = await import("../src/gpt-chat.js");
+  const { loadConfig } = await import("../src/config.js");
+  const { saveContext } = await import("../src/project-context.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  cfg.mcp = { ...cfg.mcp, hindsight: true };
+  cfg.memory.hindsight_mcp = "http://localhost:8888/mcp/";
+  saveContext(cfg, dir, { files: [], links: [{ url: "https://example.com/spec", title: "Spec" }] });
+  const events: any[] = [];
+  const chat = new GptChat(cfg, "gpt-6-astra", (e) => events.push(e), dir);
+  const idle = () => new Promise<void>((r) => { const t = setInterval(() => { if (!chat.busy) { clearInterval(t); r(); } }, 20); });
+  const runs = () => readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]);
+  try {
+    chat.send("spawn a helper");
+    await idle();
+    const first = runs().at(-1)!;
+    assert.match(first.at(-1)!, /Spec: https:\/\/example\.com\/spec/); // the project's pinned context
+    assert.match(first.at(-1)!, /harness_memory/); // told about its memory
+    assert.ok(first.some((a) => /^mcp_servers\.harness_memory\.url="http:\/\/localhost:8888\/mcp\/coding-agent%3A%3A[^"]+\/"$/.test(a))); // this project's memory bank
+    assert.ok(first.includes("sandbox_workspace_write.network_access=true")); // commands can use the network
+    assert.ok(events.some((e) => e.type === "agent" && e.agent === "GPT subagent" && e.description === "check the tests"));
+    assert.ok(events.some((e) => e.type === "tool" && e.name === "Subagent replied" && e.summary === "tests pass"));
+    const ctx = await chat.context();
+    assert.ok(ctx && ctx.total === 27200 && ctx.max > 27200 && ctx.grid.length === 10);
+    chat.send("again");
+    await idle();
+    assert.doesNotMatch(runs().at(-1)!.at(-1)!, /Notes from the harness/); // only once per thread
+    // A correction while busy stops the step and carries on with it at once.
+    chat.send("slow job");
+    await new Promise((r) => setTimeout(r, 300));
+    chat.change("use port 4000 instead");
+    await idle();
+    await new Promise((r) => setTimeout(r, 300));
+    await idle();
+    assert.match(runs().at(-1)!.at(-1)!, /corrected the task while you were working on it.*use port 4000/);
+    assert.ok(!events.some((e) => e.type === "turn-end" && e.isError), "the stopped step isn't shown as an error");
+    // Fork: a copy that starts a fresh thread from the transcript.
+    const forkId = await chat.fork();
+    const copy = new GptChat(cfg, "gpt-6-astra", () => {}, dir);
+    copy.resume(forkId);
+    copy.send("continue");
+    await new Promise<void>((r) => { const t = setInterval(() => { if (!copy.busy) { clearInterval(t); r(); } }, 20); });
+    const forkRun = runs().at(-1)!;
+    assert.ok(!forkRun.includes("resume"), "a fork starts a new Codex thread");
+    assert.match(forkRun.at(-1)!, /This chat is a copy.*User: spawn a helper/s);
+  } finally {
+    delete process.env.HARNESS_CODEX_BIN;
+    delete process.env.FAKE_CODEX_LOG;
+  }
+});
+
+test("bridge: a second copy of the app doesn't take over a terminal link that's in use", async () => {
+  const { bridgeInUse } = await import("../src/bridge.js");
+  const { createServer } = await import("node:net");
+  const p = join(mkdtempSync(join(tmpdir(), "br-")), "b.sock");
+  assert.equal(await bridgeInUse(p), false);
+  const srv = createServer(() => {});
+  await new Promise<void>((r) => srv.listen(p, () => r()));
+  try {
+    assert.equal(await bridgeInUse(p), true);
+  } finally {
+    srv.close();
   }
 });

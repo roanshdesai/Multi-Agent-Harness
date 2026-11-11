@@ -1,4 +1,6 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, session, powerSaveBlocker, type WebContents } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, session, powerSaveBlocker, protocol, net, type WebContents } from "electron";
+import { pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,7 +8,7 @@ import { homedir } from "node:os";
 import { loadConfig, saveModels, MODEL_ROLES, type HarnessConfig } from "../config.js";
 import { Harness } from "../session.js";
 import { Host } from "../host.js";
-import { startBridge } from "../bridge.js";
+import { startBridge, bridgeInUse } from "../bridge.js";
 import { buildAgents, agentRunsOn, customAgentNames } from "../agents.js";
 import { runEvals } from "../eval.js";
 import { loadDesignLinks, searchDesignLinks, filterByPlatform } from "../tools/design-library.js";
@@ -153,6 +155,7 @@ function createWindow(chatId?: string) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      plugins: true, // Chromium's PDF viewer, for PDFs opened in a document tab
     },
   });
   const id = win.webContents.id;
@@ -320,6 +323,15 @@ async function runLearning() {
   return lastLearn;
 }
 void app.whenReady().then(() => {
+  // harness-doc://f/?p=<path>: serves only files a document tab may open (same rule as doc-read).
+  protocol.handle("harness-doc", (req) => {
+    try {
+      const p = new URL(req.url).searchParams.get("p") ?? "";
+      return net.fetch(pathToFileURL(readDoc(p, docRoots()).path).toString());
+    } catch {
+      return new Response("Not allowed", { status: 403 });
+    }
+  });
   if (cfg.learning?.enabled === false) return;
   setTimeout(() => void runLearning(), 2 * 60_000);
   setInterval(() => void runLearning(), Math.max(2, cfg.learning?.every_minutes ?? 10) * 60_000);
@@ -431,12 +443,23 @@ ipcMain.handle("answer", (_e, tabId: string, id: string, answers: Record<string,
 ipcMain.handle("change", (_e, tabId: string, text: string) => host.change(tabId, text, "app"));
 ipcMain.handle("context", (_e, tabId: string) => host.context(tabId));
 
-// Documents
-const docRoots = () => [process.cwd(), cfg.root];
+// Documents: the project folder, the data folder, and files pinned to the project (they may live elsewhere).
+const docRoots = () => [process.cwd(), cfg.root, ...loadContext(cfg, process.cwd()).files];
+const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"]);
 ipcMain.handle("docs", () => listDocs(process.cwd(), host.touched));
 ipcMain.handle("doc-read", (_e, path: string) => {
   const d = readDoc(path, docRoots());
-  return { ...d, summary: cachedSummary(cfg, d.path) };
+  // PDFs and images show in the tab from harness-doc:; Word files are turned into HTML (macOS textutil).
+  const url = `harness-doc://f/?p=${encodeURIComponent(d.path)}`;
+  let html: string | null = null;
+  if (d.ext === ".docx" && process.platform === "darwin") {
+    try {
+      html = execFileSync("textutil", ["-convert", "html", "-stdout", d.path], { encoding: "utf8", maxBuffer: 20 * 1024 * 1024, timeout: 20000 });
+    } catch {
+      html = null;
+    }
+  }
+  return { ...d, url: d.ext === ".pdf" || IMAGE_EXT.has(d.ext) ? url : null, image: IMAGE_EXT.has(d.ext), html, summary: cachedSummary(cfg, d.path) };
 });
 ipcMain.handle("doc-summarize", (_e, path: string, force?: boolean) => summarizeDoc(new Harness(cfg, askFor(0)), path, docRoots(), force));
 ipcMain.handle("doc-open-external", (_e, path: string) => shell.openPath(readDoc(path, docRoots()).path));
@@ -492,6 +515,8 @@ ipcMain.handle("eval", async (_e, tabId: string, filter: string) => {
 // ── lifecycle ───────────────────────────────────────────────────────────────
 app.setName("Multi-Agent Harness");
 // One app instance owns the terminal link; a second launch just focuses the first.
+// Must be registered before the app is ready.
+protocol.registerSchemesAsPrivileged([{ scheme: "harness-doc", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 if (!app.requestSingleInstanceLock()) app.quit();
 // Opening the app again while it runs: show its window, or open one if it was
 // closed (on macOS the app keeps running without windows).
@@ -512,15 +537,19 @@ app.whenReady().then(() => {
   });
 
   createWindow();
-  // Terminals started while the app is open attach to it.
-  startBridge(
-    host,
-    (tabId) => {
-      const win = winFor(host.get(tabId).windowId);
-      win?.webContents.send("focus-tab", tabId);
-    },
-    () => lastFocused || [...windows.keys()][0] || 0,
-  );
+  // Terminals started while the app is open attach to it. If another copy of the
+  // app already has the link (e.g. the installed app while one runs from source), leave it alone.
+  void bridgeInUse().then((busy) => {
+    if (busy) return console.log("Another Multi-Agent Harness has the terminal link; this copy runs without it.");
+    startBridge(
+      host,
+      (tabId) => {
+        const win = winFor(host.get(tabId).windowId);
+        win?.webContents.send("focus-tab", tabId);
+      },
+      () => lastFocused || [...windows.keys()][0] || 0,
+    );
+  });
   app.on("activate", () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
 app.on("window-all-closed", () => process.platform !== "darwin" && app.quit());

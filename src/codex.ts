@@ -5,14 +5,31 @@ import { codexBin, subscriptionEnv } from "./subscription.js";
 export interface CodexEvent {
   type: string;
   thread_id?: string;
-  item?: { id?: string; type?: string; text?: string; command?: string; query?: string; server?: string; tool?: string; status?: string; aggregated_output?: string; changes?: { path: string; kind?: string }[] };
+  item?: {
+    id?: string;
+    type?: string;
+    text?: string;
+    command?: string;
+    query?: string;
+    server?: string;
+    tool?: string;
+    status?: string;
+    aggregated_output?: string;
+    changes?: { path: string; kind?: string }[];
+    /** collab_tool_call (Codex subagents): spawn_agent / send_input / wait. */
+    prompt?: string | null;
+    receiver_thread_ids?: string[];
+    agents_states?: Record<string, { status?: string; message?: string | null }>;
+  };
+  /** turn.completed: tokens of this turn (input includes the whole conversation so far). */
+  usage?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number };
   error?: { message?: string } | string;
   message?: string;
 }
 
 export interface CodexRun {
   child: ChildProcess;
-  done: Promise<{ threadId?: string; text: string; ok: boolean; error?: string }>;
+  done: Promise<{ threadId?: string; text: string; ok: boolean; error?: string; usage?: CodexEvent["usage"] }>;
 }
 
 export interface CodexOptions {
@@ -24,6 +41,8 @@ export interface CodexOptions {
   images?: string[];
   sandbox?: "read-only" | "workspace-write";
   ephemeral?: boolean;
+  /** Extra Codex settings, as key=value (each passed with -c). */
+  config?: string[];
   /** Fast mode: Codex's "priority" service tier (about 2x speed on GPT-6 Astra / 6.1 Sol, uses more of the plan). */
   fast?: boolean;
   onEvent?: (e: CodexEvent) => void;
@@ -42,13 +61,17 @@ export function runCodex(o: CodexOptions): CodexRun {
     "-c", `sandbox_mode="${o.sandbox ?? "workspace-write"}"`,
     ...(o.ephemeral ? ["--ephemeral"] : []),
     ...(o.fast ? ["-c", 'service_tier="priority"'] : []),
+    // Commands may use the network (installs, git, curl), like Claude's agents can.
+    ...((o.sandbox ?? "workspace-write") === "workspace-write" ? ["-c", "sandbox_workspace_write.network_access=true"] : []),
+    ...(o.config ?? []).flatMap((c) => ["-c", c]),
     ...(o.images ?? []).flatMap((i) => ["-i", i]),
   ];
   const args = o.resume ? ["exec", "resume", ...common, o.resume, o.prompt] : ["exec", ...common, o.prompt];
   const child = spawn(codexBin(o.root), args, { cwd: o.cwd, env: subscriptionEnv(), stdio: ["ignore", "pipe", "pipe"] });
 
-  const done = new Promise<{ threadId?: string; text: string; ok: boolean; error?: string }>((resolve) => {
+  const done = new Promise<{ threadId?: string; text: string; ok: boolean; error?: string; usage?: CodexEvent["usage"] }>((resolve) => {
     let threadId = o.resume;
+    let usage: CodexEvent["usage"];
     let text = "";
     let error: string | undefined;
     let buf = "";
@@ -68,6 +91,7 @@ export function runCodex(o: CodexOptions): CodexRun {
           continue;
         }
         if (e.type === "thread.started" && e.thread_id) threadId = e.thread_id;
+        if (e.type === "turn.completed" && e.usage) usage = e.usage;
         if (e.type === "item.completed" && e.item?.type === "agent_message" && e.item.text) text = e.item.text;
         if (e.type === "turn.failed" || e.type === "error") {
           error = typeof e.error === "string" ? e.error : (e.error?.message ?? e.message ?? "Codex turn failed");
@@ -76,9 +100,9 @@ export function runCodex(o: CodexOptions): CodexRun {
       }
     });
     child.stderr!.on("data", (d) => (stderr += d));
-    child.on("error", (err) => resolve({ threadId, text, ok: false, error: err.message }));
+    child.on("error", (err) => resolve({ threadId, text, ok: false, error: err.message, usage }));
     child.on("close", (code) =>
-      resolve({ threadId, text, ok: code === 0 && !error, error: error ?? (code !== 0 ? stderr.trim().slice(-800) || `codex exited ${code}` : undefined) }),
+      resolve({ threadId, text, ok: code === 0 && !error, error: error ?? (code !== 0 ? stderr.trim().slice(-800) || `codex exited ${code}` : undefined), usage }),
     );
   });
   return { child, done };

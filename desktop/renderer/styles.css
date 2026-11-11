@@ -508,3 +508,8 @@ body.platform-win.has-awake .titlebar, body.platform-linux.has-awake .titlebar {
 .ctx-drop { margin: 6px 12px 0; padding: 10px; border: 1px dashed var(--rule); border-radius: 6px; color: var(--ink-3); font-size: 11.5px; text-align: center; }
 .ctx-drop.drop { border-color: var(--signal); color: var(--ink); }
 @media (max-width: 1100px) { .ctx-panel { position: fixed; right: 0; top: 30px; bottom: 0; z-index: 10; box-shadow: var(--shadow); } }
+#ctxBtn.pinned { color: var(--moss); }
+.doc-scroll.doc-full .doc-inner { max-width: none; height: 100%; padding: 0; }
+.doc-pdf { width: 100%; height: calc(100vh - 140px); border: 0; background: var(--paper); }
+.doc-image { display: block; max-width: 100%; height: auto; margin: 8px auto; border: 1px solid var(--rule); border-radius: 4px; }
+.doc-html { font-size: 13.5px; }
