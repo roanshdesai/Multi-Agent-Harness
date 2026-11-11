@@ -42,6 +42,8 @@ export interface HarnessConfig {
   memory: { claude_mem: string[]; hindsight: string[]; hindsight_mcp?: string };
   advisor: { auto: boolean };
   limits: { fallback_to_gpt: boolean; warn_at: number; refresh_minutes?: number };
+  /** Codex (ChatGPT plan). fast: start GPT tabs in fast mode (priority tier; uses more of the plan). */
+  codex?: { fast?: boolean };
   /** Self-learning (instincts): which model reads finished chats, how long a chat must be quiet first, how far back to read. */
   learning?: { enabled?: boolean; model?: string; idle_minutes?: number; since_days?: number; every_minutes?: number };
   /** handoff_at: share of the context window (0-1) at which a hand-off summary is prepared. 0 turns it off. */

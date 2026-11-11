@@ -76,6 +76,11 @@ remote:
   # unless you also start the public tunnel. Fixed port so the link stays the same.
   port: 47615
 
+codex:
+  # Start GPT tabs in fast mode (Codex's priority tier: about 2x speed, uses more
+  # of your ChatGPT plan). /fast or the Fast switch toggles it per tab.
+  fast: false
+
 learning:
   # Self-learning: a few minutes after a chat in one of your projects goes quiet,
   # a cheap model reads your messages and keeps lessons about how you work

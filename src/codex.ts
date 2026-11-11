@@ -24,6 +24,8 @@ export interface CodexOptions {
   images?: string[];
   sandbox?: "read-only" | "workspace-write";
   ephemeral?: boolean;
+  /** Fast mode: Codex's "priority" service tier (about 2x speed on GPT-6 Astra / 6.1 Sol, uses more of the plan). */
+  fast?: boolean;
   onEvent?: (e: CodexEvent) => void;
 }
 
@@ -39,6 +41,7 @@ export function runCodex(o: CodexOptions): CodexRun {
     "-c", 'approval_policy="never"',
     "-c", `sandbox_mode="${o.sandbox ?? "workspace-write"}"`,
     ...(o.ephemeral ? ["--ephemeral"] : []),
+    ...(o.fast ? ["-c", 'service_tier="priority"'] : []),
     ...(o.images ?? []).flatMap((i) => ["-i", i]),
   ];
   const args = o.resume ? ["exec", "resume", ...common, o.resume, o.prompt] : ["exec", ...common, o.prompt];

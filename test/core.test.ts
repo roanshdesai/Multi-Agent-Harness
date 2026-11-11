@@ -934,3 +934,35 @@ test("/cloud: branch, secrets, public repos, send to the cloud and bring the wor
     delete process.env.FAKE_CLAUDE_LOG;
   }
 });
+
+test("/fast: GPT tabs run Codex on the priority tier; Claude tabs say it isn't available", async () => {
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const log = join(mkdtempSync(join(tmpdir(), "fast-")), "codex.log");
+  process.env.FAKE_CODEX_LOG = log;
+  const { readFileSync } = await import("node:fs");
+  const { Host } = await import("../src/host.js");
+  const { loadConfig } = await import("../src/config.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const host = new Host(cfg, () => async () => "n");
+  const events: any[] = [];
+  host.listen((m) => m.type === "event" && events.push(m.event));
+  try {
+    const gpt = host.createTab({ windowId: 1, model: "gpt-6-astra" });
+    host.send(gpt.id, "/fast");
+    assert.equal(host.list().find((t) => t.id === gpt.id)!.fast, true);
+    assert.match(events.at(-1).text, /Fast mode on for gpt-6-astra/);
+    host.send(gpt.id, "hello");
+    await new Promise<void>((r) => { const t = setInterval(() => { if (!host.list().find((x) => x.id === gpt.id)!.busy && readFileSync(log, "utf8").includes("hello")) { clearInterval(t); r(); } }, 20); });
+    const args = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)).find((a) => a.includes("hello"));
+    assert.ok(args.join(" ").includes('service_tier="priority"'));
+    host.send(gpt.id, "/fast off");
+    assert.equal(host.list().find((t) => t.id === gpt.id)!.fast, false);
+    const claude = host.createTab({ windowId: 1, model: cfg.models.main });
+    host.send(claude.id, "/fast");
+    assert.match(events.at(-1).text, /isn't available on your Claude plan/);
+  } finally {
+    delete process.env.HARNESS_CODEX_BIN;
+    delete process.env.FAKE_CODEX_LOG;
+  }
+});

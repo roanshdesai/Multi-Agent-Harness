@@ -848,6 +848,11 @@ api.onTabs((list) => {
 });
 api.onFocusTab((id) => tabs.has(id) && activate(id));
 
+$("fastBtn").onclick = () => {
+  const s = cur();
+  if (s?.type === "chat" && s.info.kind === "gpt") api.send(s.id, "/fast", []);
+};
+
 /** While a tab's task runs in a Claude cloud session: where it is, and a way to bring it back. */
 function renderCloudBar(s) {
   const bar = $("cloudBar");
@@ -881,6 +886,8 @@ function syncToolbar() {
   $("toolbar").querySelector(".top-actions").hidden = !chat;
   $("composerWrap").hidden = !chat;
   renderCloudBar(chat ? s : null);
+  $("fastBtn").hidden = !(chat && s.info.kind === "gpt");
+  $("fastBtn").classList.toggle("on", !!(chat && s.info.fast));
   $("chatTitle").textContent = chat ? s.info.title : s.title;
   if (chat) {
     $("verifyBtn").classList.toggle("on", s.info.verify);

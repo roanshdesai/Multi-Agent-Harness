@@ -19,6 +19,8 @@ export interface TabInfo {
   title: string;
   busy: boolean;
   verify: boolean;
+  /** GPT tabs: fast mode on (/fast). */
+  fast?: boolean;
   /** Set while this tab's task runs in a Claude cloud session (/cloud). */
   cloud?: { branch: string; url?: string; inTerminal?: boolean; at: number } | null;
 }
@@ -113,6 +115,7 @@ export class Host {
       title: t.title,
       busy: t.engine.busy,
       verify: t.harness.verifyEnabled,
+      fast: t.engine.kind === "gpt" ? !!t.engine.fast : false,
       cloud: this.cloudOf(t) && { branch: this.cloudOf(t)!.branch, url: this.cloudOf(t)!.url, inTerminal: this.cloudOf(t)!.inTerminal, at: this.cloudOf(t)!.at },
     };
   }
@@ -323,6 +326,16 @@ ${repo} is a public repository: anyone can read what's pushed. Include this proj
    */
   send(tabId: string, text: string, source = "app", mentions?: string[]) {
     const t = this.get(tabId);
+    // /fast: GPT tabs only (the Claude plan here doesn't offer fast mode).
+    const fastCmd = text.trim().match(/^\/fast(?:\s+(on|off))?\s*$/i);
+    if (fastCmd) {
+      const note = (msg: string) => this.broadcast({ type: "event", tabId, event: { type: "note", text: msg } });
+      if (t.engine.kind !== "gpt") return note("Fast mode isn't available on your Claude plan. It works in GPT tabs: switch this tab's model to a GPT one, then /fast.");
+      t.engine.fast = fastCmd[1] ? fastCmd[1].toLowerCase() === "on" : !t.engine.fast;
+      note(t.engine.fast ? `Fast mode on for ${t.engine.model}: about 2x speed, uses more of your ChatGPT plan. /fast again turns it off.` : "Fast mode off.");
+      this.publishTabs();
+      return;
+    }
     // /cloud and /cloud back work the same from the app and a linked terminal.
     const cloudCmd = text.trim().match(/^\/cloud(?:\s+(back))?\s*$/i);
     if (cloudCmd) {

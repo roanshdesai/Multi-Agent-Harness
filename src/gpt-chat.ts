@@ -51,12 +51,17 @@ export class GptChat implements Engine {
   private items: HistoryItem[] = [];
   private title = "";
 
+  /** Fast mode for this tab (/fast); starts from codex.fast in harness.config.yaml. */
+  fast: boolean;
+
   constructor(
     private cfg: HarnessConfig,
     public model: string,
     private emit: (e: ChatEvent) => void,
     readonly cwd = process.cwd(),
-  ) {}
+  ) {
+    this.fast = cfg.codex?.fast === true;
+  }
 
   private file(id: string) {
     return join(dirFor(this.cfg), `${id}.json`);
@@ -188,7 +193,7 @@ export class GptChat implements Engine {
       this.items.push({ role: "user", text: prompt });
       const full = this.pendingContext ? `${this.pendingContext}\n\n${prompt}` : prompt;
       this.pendingContext = "";
-      const run = runCodex({ root: this.cfg.root, model: this.model, prompt: full, cwd: this.cwd, resume: this.sessionId, onEvent: this.onCodexEvent });
+      const run = runCodex({ root: this.cfg.root, model: this.model, prompt: full, cwd: this.cwd, resume: this.sessionId, fast: this.fast, onEvent: this.onCodexEvent });
       this.child = run.child;
       const r = await run.done;
       if (r.threadId && !this.sessionId) this.sessionId = r.threadId;

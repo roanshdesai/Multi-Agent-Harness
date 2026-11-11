@@ -67,6 +67,8 @@ export interface Engine {
   model: string;
   sessionId?: string;
   busy: boolean;
+  /** Fast mode (GPT tabs only: Codex's priority tier). */
+  fast?: boolean;
   /** Send a message. `prompt` is what the model gets when it differs from what's shown (e.g. @app notes). */
   send(text: string, source?: string, prompt?: string): void;
   stop(): Promise<void>;

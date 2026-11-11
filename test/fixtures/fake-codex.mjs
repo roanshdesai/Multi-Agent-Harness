@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Stands in for the Codex CLI in tests: answers `login status` and emits `exec --json` events.
 const args = process.argv.slice(2);
+if (process.env.FAKE_CODEX_LOG) (await import("node:fs")).appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify(args) + "\n");
 if (args[0] === "login" && args[1] === "status") {
   console.log("Logged in using ChatGPT");
   process.exit(0);

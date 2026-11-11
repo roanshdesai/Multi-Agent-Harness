@@ -372,7 +372,8 @@ async function command(line: string): Promise<boolean> {
   if (bridge && tabId) {
     switch (cmd) {
       case "/cloud": // runs in the app, on this tab
-        send(arg ? `/cloud ${arg}` : "/cloud");
+      case "/fast":
+        send(arg ? `${cmd} ${arg}` : cmd);
         return true;
       case "/tabs":
         appTabs.forEach((t, i) => console.log(tabLine(t, i)));
@@ -650,6 +651,13 @@ async function command(line: string): Promise<boolean> {
       console.log(hits.map((h) => `- ${h.title}  ${c.dim(h.url)}${h.section ? c.dim(`  [${h.section}]`) : ""}`).join("\n") || c.dim("No matches."));
       return true;
     }
+    case "/fast":
+      if (engine.kind !== "gpt") console.log("Fast mode isn't available on your Claude plan. It works with GPT models (--model gpt-6-astra), then /fast.");
+      else {
+        engine.fast = arg ? arg.toLowerCase() === "on" : !engine.fast;
+        console.log(engine.fast ? `Fast mode on for ${engine.model}: about 2x speed, uses more of your ChatGPT plan.` : "Fast mode off.");
+      }
+      return true;
     case "/cloud":
       console.log("/cloud runs from the desktop app (or a terminal linked to it with npm start while the app is open): it needs the app's tabs and approval dialog.");
       return true;
