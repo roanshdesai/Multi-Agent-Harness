@@ -20,9 +20,9 @@ models:
   image: gpt-6.1-sol             # image generation, editing and analysis (via Codex)
   image_fallback: gpt-6-astra
   # GPT models you can pick at the top of a tab (ChatGPT subscription, via Codex)
-  gpt: [gpt-6-astra, gpt-6.1-sol]
+  gpt: [gpt-6.1-sol, gpt-6-astra, gpt-6.1-terra, gpt-6-sol, gpt-6-luna]
   # Claude models offered in each tab's picker. Leave empty to offer everything your plan has.
-  claude: []
+  claude: [claude-opus-5-5, claude-fable-5-2, claude-fable-5-1, claude-sonnet-5-5, claude-haiku-5-5]
   # Fallback chain (item 10): tried in order if the primary is overloaded/unavailable
   fallback: [claude-opus-5-5, claude-sonnet-5-5]
 
@@ -45,6 +45,7 @@ limits:
   # (ChatGPT plan) and send new tabs there until the limit resets.
   fallback_to_gpt: true
   warn_at: 0.8   # show a heads-up when a usage window passes 80%
+  switch_at: 0.95   # move Claude tabs to GPT once the 5-hour or weekly window passes 95% (1 = only when it's out)
   refresh_minutes: 5   # re-read plan usage this often (0 = only at start and when you open Usage)
 
 extensions:

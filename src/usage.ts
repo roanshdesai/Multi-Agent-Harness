@@ -93,6 +93,15 @@ export function isExhausted(s: UsageSnapshot | null | undefined): boolean {
   return blocked.length === 0 || blocked.some((w) => !PARTIAL.test(w.key));
 }
 
+/**
+ * Claude is almost out: a plan window (5-hour or weekly, not a single model's
+ * or extra usage) is at or past `at` and hasn't reset yet.
+ */
+export function nearLimit(s: UsageSnapshot | null | undefined, at: number, now = Date.now()): boolean {
+  if (!s || at >= 1) return false;
+  return s.windows.some((w) => !PARTIAL.test(w.key) && (w.utilization ?? 0) >= at && (!w.resetsAt || w.resetsAt > now));
+}
+
 /** Claude just answered, so it isn't out: clear a stale block. */
 export function markWorking(s: UsageSnapshot): UsageSnapshot {
   return s.status === "rejected" ? { ...s, at: Date.now(), status: "allowed", resetsAt: null } : s;

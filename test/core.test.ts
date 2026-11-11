@@ -1035,3 +1035,43 @@ test("project context: pinned files and links per project go into the chat's ins
   assert.match(block, /- Figma: https:\/\/example\.com\/figma/);
   assert.equal(PC.contextBlock(cfg, b), ""); // another project doesn't get it
 });
+
+test("near the Claude limit: a Claude tab's next message moves to GPT, with the conversation, pinned context and lessons", async () => {
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const log = join(mkdtempSync(join(tmpdir(), "near-")), "codex.log");
+  process.env.FAKE_CODEX_LOG = log;
+  const { readFileSync } = await import("node:fs");
+  const { Host, gptHandover } = await import("../src/host.js");
+  const { nearLimit } = await import("../src/usage.js");
+  const { loadConfig } = await import("../src/config.js");
+  const { saveContext } = await import("../src/project-context.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const soon = Date.now() + 3600_000;
+  const snap = (u: number, key = "five_hour") => ({ at: Date.now(), status: "allowed_warning", windows: [{ key, label: "5-hour limit", utilization: u, resetsAt: soon, status: "allowed" }], resetsAt: null, overage: null }) as any;
+  assert.equal(nearLimit(snap(0.96), 0.95), true);
+  assert.equal(nearLimit(snap(0.9), 0.95), false);
+  assert.equal(nearLimit(snap(0.99, "seven_day_opus"), 0.95), false); // one model's window doesn't count
+  // The hand-over carries the conversation and what Claude's instructions had.
+  saveContext(cfg, process.cwd(), { files: [], links: [{ url: "https://example.com/spec", title: "Spec" }] });
+  const text = gptHandover([{ role: "user", text: "build the login page" } as any, { role: "assistant", text: "Done step 1" } as any], process.cwd(), cfg, true);
+  assert.match(text, /almost used up/);
+  assert.match(text, /User: build the login page\nAssistant: Done step 1/);
+  assert.match(text, /- Spec: https:\/\/example\.com\/spec/);
+  const host = new Host(cfg, () => async () => "n");
+  const events: any[] = [];
+  host.listen((m) => m.type === "event" && events.push(m.event));
+  try {
+    const tab = host.createTab({ windowId: 1, model: cfg.models.main });
+    assert.equal(host.list()[0].kind, "claude");
+    (host as any).usage = snap(0.97);
+    host.send(tab.id, "keep going");
+    await new Promise<void>((r) => { const t = setInterval(() => { try { if (readFileSync(log, "utf8").includes("keep going")) { clearInterval(t); r(); } } catch {} }, 20); });
+    assert.equal(host.list().find((t) => t.id === tab.id)!.kind, "gpt");
+    assert.ok(events.some((e) => e.type === "note" && /almost used up \(97%\)/.test(e.text)));
+    assert.ok(events.some((e) => e.type === "user" && e.text === "keep going")); // shown as the user's own message
+  } finally {
+    delete process.env.HARNESS_CODEX_BIN;
+    delete process.env.FAKE_CODEX_LOG;
+  }
+});

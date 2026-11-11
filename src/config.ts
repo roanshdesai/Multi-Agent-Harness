@@ -41,7 +41,8 @@ export interface HarnessConfig {
   /** hindsight_mcp: the address agents use to read/write Hindsight memory (HINDSIGHT_MCP_URL in .env wins). */
   memory: { claude_mem: string[]; hindsight: string[]; hindsight_mcp?: string };
   advisor: { auto: boolean };
-  limits: { fallback_to_gpt: boolean; warn_at: number; refresh_minutes?: number };
+  /** switch_at: move Claude tabs to GPT once a plan window passes this share (0-1), before it runs out. 1 = only when out. */
+  limits: { fallback_to_gpt: boolean; warn_at: number; refresh_minutes?: number; switch_at?: number };
   /** Codex (ChatGPT plan). fast: start GPT tabs in fast mode (priority tier; uses more of the plan). */
   codex?: { fast?: boolean };
   /** Self-learning (instincts): which model reads finished chats, how long a chat must be quiet first, how far back to read. */

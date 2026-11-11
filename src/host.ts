@@ -6,7 +6,9 @@ import { Harness } from "./session.js";
 import { ChatEngine, attachmentNote, expandShortcut, mentionNote, parseMentions, type ChatEvent, type ChatSummary, type Engine, type HistoryItem } from "./engine.js";
 import { GptChat, listGptChats, isGptChat } from "./gpt-chat.js";
 import type { Ask } from "./guards.js";
-import { isExhausted, loadUsage, formatReset, type UsageSnapshot } from "./usage.js";
+import { isExhausted, nearLimit, loadUsage, formatReset, type UsageSnapshot } from "./usage.js";
+import { strongInstincts } from "./instincts.js";
+import { loadContext } from "./project-context.js";
 import { readCodexUsage } from "./codex-usage.js";
 import { sendToCloud, returnFromCloud, loadCloudStates, saveCloudState, type CloudState } from "./cloud.js";
 
@@ -47,6 +49,31 @@ let seq = 0;
  * several tasks can run at once. Events go to every listener: app windows and
  * terminals attached through the bridge.
  */
+/**
+ * What a GPT tab starts from when a Claude task moves over: as much of the
+ * conversation as fits (newest kept, ~60k characters), plus the project's
+ * pinned files and links and the strong lessons about how the user works,
+ * since those were in Claude's instructions and GPT wouldn't otherwise see them.
+ */
+export function gptHandover(history: HistoryItem[], cwd: string, cfg: HarnessConfig, almost = false): string {
+  const lines: string[] = [];
+  let size = 0;
+  for (const h of [...history].reverse()) {
+    const who = h.role === "user" ? "User" : h.role === "assistant" ? "Assistant" : `(${h.role})`;
+    const line = `${who}: ${h.text.slice(0, h.role === "tool" ? 400 : 4000)}`;
+    if (size + line.length > 60_000) break;
+    lines.unshift(line);
+    size += line.length;
+  }
+  const parts = [`You are continuing a task that was running on Claude until its usage ${almost ? "was almost used up" : "limit was reached"}. Here is the conversation so far${lines.length < history.length ? " (the oldest part is left out)" : ""}:`, "", lines.join("\n") || "(no earlier messages)"];
+  const ctx = loadContext(cfg, cwd);
+  if (ctx.files.length || ctx.links.length) parts.push("", "Files and links the user pinned to this project (open what's relevant):", ...ctx.files.map((f) => `- ${f}`), ...ctx.links.map((l) => `- ${l.title ? `${l.title}: ` : ""}${l.url}`));
+  const lessons = strongInstincts(cfg, cwd);
+  if (lessons.length) parts.push("", "How this user wants work done (learned):", ...lessons.map((i) => `- ${i.trigger}: ${i.action}`));
+  parts.push("", "Pick up where it left off. The user's latest request follows.");
+  return parts.join("\n");
+}
+
 export class Host {
   private tabs = new Map<string, Tab>();
   private listeners = new Set<HostListener>();
@@ -87,9 +114,9 @@ export class Host {
     return this.usage;
   }
 
-  /** Claude is out of usage right now (so new work goes to GPT). */
+  /** Claude is out of usage, or almost (limits.switch_at), so new work goes to GPT. */
   get claudeLimited() {
-    return this.cfg.limits.fallback_to_gpt && isExhausted(this.usage);
+    return this.cfg.limits.fallback_to_gpt && (isExhausted(this.usage) || nearLimit(this.usage, this.cfg.limits.switch_at ?? 0.95));
   }
 
   listen(fn: HostListener) {
@@ -222,12 +249,13 @@ ${repo} is a public repository: anyone can read what's pushed. Include this proj
    * Claude's usage limit was hit mid-task: carry the conversation over to GPT
    * in the same tab and re-send the request there.
    */
-  private async fallbackToGpt(tabId: string, prompt: string) {
+  private async fallbackToGpt(tabId: string, prompt: string, almost = false, shown?: string) {
     const t = this.tabs.get(tabId);
     if (!t) return;
-    const resets = formatReset(this.usage?.resetsAt ?? null);
+    const resets = formatReset(this.usage?.resetsAt ?? this.usage?.windows.find((w) => w.resetsAt)?.resetsAt ?? null);
+    const why = almost ? `Claude's usage is almost used up (${Math.round(Math.max(...(this.usage?.windows ?? []).map((w) => w.utilization ?? 0)) * 100)}%)` : "Claude's usage limit is reached";
     if (!this.cfg.limits.fallback_to_gpt) {
-      this.note(tabId, `Claude's usage limit is reached${resets ? ` (resets ${resets})` : ""}. Pick a GPT model at the top to keep going.`);
+      this.note(tabId, `${why}${resets ? ` (resets ${resets})` : ""}. Pick a GPT model at the top to keep going.`);
       return;
     }
     // Swap the engine before any await, so a message sent while the history
@@ -240,19 +268,14 @@ ${repo} is a public repository: anyone can read what's pushed. Include this proj
     try {
       const sid = claude.sessionId;
       const history = sid ? await claude.history(sid).catch(() => []) : [];
-      const transcript = history
-        .slice(-30)
-        .map((h) => `${h.role === "user" ? "User" : h.role === "assistant" ? "Assistant" : `(${h.role})`}: ${h.text.slice(0, 1500)}`)
-        .join("\n");
-      gpt.seed(
-        `You are continuing a task that was running on Claude until its usage limit was reached. Here is the conversation so far:\n\n${transcript || "(no earlier messages)"}\n\nPick up where it left off. The user's latest request follows.`,
-      );
+      gpt.seed(gptHandover(history, t.harness.cwd, this.cfg, almost));
     } finally {
       const waiting = t.switching ?? [];
       t.switching = undefined;
       if (t.engine === gpt) {
-        this.note(tabId, `Claude's usage limit is reached${resets ? ` (resets ${resets})` : ""}. Continuing this task on ${this.cfg.models.gpt[0]} with your ChatGPT plan.`);
-        gpt.send(prompt, "auto");
+        this.note(tabId, `${why}${resets ? ` (resets ${resets})` : ""}. Continuing this task on ${this.cfg.models.gpt[0]} with your ChatGPT plan, with the conversation so far.`);
+        if (shown !== undefined) gpt.send(shown, "app", prompt);
+        else gpt.send(prompt, "auto");
         for (const m of waiting) gpt.send(m.text, m.source, m.prompt);
       } else {
         for (const m of waiting) t.engine.send(m.text, m.source, m.prompt);
@@ -356,6 +379,11 @@ ${repo} is a public repository: anyone can read what's pushed. Include this proj
     if (t.switching) {
       t.switching.push({ text: msg, source, prompt });
       this.broadcast({ type: "event", tabId, event: { type: "user", text: msg, source, queued: true } });
+      return;
+    }
+    // Claude is almost out: move this conversation to GPT before it runs, not after Claude refuses.
+    if (t.engine.kind === "claude" && !t.engine.busy && this.cfg.limits.fallback_to_gpt && nearLimit(this.usage, this.cfg.limits.switch_at ?? 0.95)) {
+      void this.fallbackToGpt(tabId, prompt, true, msg);
       return;
     }
     t.engine.send(msg, source, prompt);

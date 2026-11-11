@@ -79,7 +79,7 @@ Its own look, built to read like a document and an instrument:
 
 **MCP servers & apps:** the sidebar's Connections item (or `/connections`, `/mcp`, `/apps`) lists every server the agents can use: the harness's own, ones from your Claude Code setup, plugin servers and claude.ai connectors. It also shows your Claude and ChatGPT accounts and the memory apps. Each server shows its status and tool count. You can reconnect a failed server, turn one off, or add your own by URL or command (saved in `mcp-servers.json`). If a server needs sign-in, open Claude Code (`claude`), run `/mcp` and sign in there.
 
-**Usage:** the bottom of the sidebar shows your Claude plan's 5-hour and weekly usage; `/usage` shows the details and reset times. If Claude runs out, the task that hit the limit carries its conversation over to GPT in the same tab and keeps going, and new tabs start on GPT until Claude resets. Turn this off with `limits.fallback_to_gpt: false`.
+**Usage:** the bottom of the sidebar shows your Claude plan's 5-hour and weekly usage; `/usage` shows the details and reset times. When Claude is almost out (95% of the 5-hour or weekly window, `limits.switch_at`) or out, a Claude tab's next message carries the conversation over to GPT in the same tab (the newest ~60k characters of it, plus the project's pinned files and links and what it has learned about how you work), and new tabs start on GPT until Claude resets. Turn this off with `limits.fallback_to_gpt: false`.
 
 **Questions:** the agent can stop and ask you something. It shows as a card with options in the app and as a numbered question in a linked terminal; answer in either.
 
