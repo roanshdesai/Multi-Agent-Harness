@@ -8,6 +8,7 @@ import { GptChat, listGptChats, isGptChat } from "./gpt-chat.js";
 import type { Ask } from "./guards.js";
 import { isExhausted, loadUsage, formatReset, type UsageSnapshot } from "./usage.js";
 import { readCodexUsage } from "./codex-usage.js";
+import { sendToCloud, returnFromCloud, loadCloudStates, saveCloudState, type CloudState } from "./cloud.js";
 
 export interface TabInfo {
   id: string;
@@ -18,6 +19,8 @@ export interface TabInfo {
   title: string;
   busy: boolean;
   verify: boolean;
+  /** Set while this tab's task runs in a Claude cloud session (/cloud). */
+  cloud?: { branch: string; url?: string; inTerminal?: boolean; at: number } | null;
 }
 
 interface Tab {
@@ -26,6 +29,8 @@ interface Tab {
   engine: Engine;
   harness: Harness;
   title: string;
+  /** Set while the tab's task runs in a Claude cloud session. */
+  cloud?: CloudState | null;
   /** Set while the tab is moving to GPT; messages sent meanwhile wait here. */
   switching?: { text: string; source: string; prompt: string }[];
 }
@@ -108,7 +113,55 @@ export class Host {
       title: t.title,
       busy: t.engine.busy,
       verify: t.harness.verifyEnabled,
+      cloud: this.cloudOf(t) && { branch: this.cloudOf(t)!.branch, url: this.cloudOf(t)!.url, inTerminal: this.cloudOf(t)!.inTerminal, at: this.cloudOf(t)!.at },
     };
+  }
+
+  /** The cloud hand-off for this tab, also after a restart (saved by chat id). */
+  private cloudOf(t: Tab): CloudState | null {
+    if (t.cloud !== undefined) return t.cloud;
+    const id = t.engine.sessionId;
+    return id ? (loadCloudStates(this.cfg)[id] ?? null) : null;
+  }
+
+  /**
+   * /cloud: stop the tab's task, write its hand-off, and send it to a Claude
+   * cloud session (see cloud.ts). The tab then waits until you continue here.
+   */
+  async cloud(tabId: string): Promise<{ note: string; url?: string; branch: string }> {
+    const t = this.get(tabId);
+    if (!(t.engine instanceof ChatEngine)) throw new Error("/cloud works on Claude chats. This tab runs on GPT.");
+    if (this.cloudOf(t)) throw new Error("This tab's task is already in the cloud. Use Continue here (or /cloud back) first.");
+    if (t.engine.busy) await t.engine.stop().catch(() => {});
+    const h = await t.engine.handoff(false);
+    if (!h) throw new Error("Nothing to send yet: start the task here first, then /cloud.");
+    const ask = this.askFor(t.windowId);
+    const r = await sendToCloud(this.cfg, t.harness.cwd, t.title || "Continue the task", h.text, ask, async (repo) =>
+      /^y/i.test((await ask(`⚠ Approve GitHub action?
+${repo} is a public repository: anyone can read what's pushed. Include this project's memory (.cloud/memory.md, secrets removed)? Say no to send only the hand-off note. [y/N]`)).trim()),
+    );
+    const { note, ...state } = r;
+    t.cloud = state;
+    if (t.engine.sessionId) saveCloudState(this.cfg, t.engine.sessionId, state);
+    this.publishTabs();
+    return { note, url: state.url, branch: state.branch };
+  }
+
+  /** Bring a cloud task back: check out its branch here and continue in this tab from what it did. */
+  async cloudBack(tabId: string): Promise<{ note: string }> {
+    const t = this.get(tabId);
+    const state = this.cloudOf(t);
+    if (!state) throw new Error("This tab has nothing in the cloud.");
+    const { summary, note } = await returnFromCloud(state, this.askFor(t.windowId));
+    const oldId = t.engine.sessionId;
+    // A fresh session in the same tab: the old chat may already be near its context limit.
+    this.retarget(t, state.cwd, t.engine.model);
+    t.engine.seed(summary);
+    t.cloud = null;
+    if (oldId) saveCloudState(this.cfg, oldId, null);
+    t.title = `${t.title} (back from cloud)`;
+    this.publishTabs();
+    return { note };
   }
 
   list(windowId?: number): TabInfo[] {
@@ -270,6 +323,17 @@ export class Host {
    */
   send(tabId: string, text: string, source = "app", mentions?: string[]) {
     const t = this.get(tabId);
+    // /cloud and /cloud back work the same from the app and a linked terminal.
+    const cloudCmd = text.trim().match(/^\/cloud(?:\s+(back))?\s*$/i);
+    if (cloudCmd) {
+      const note = (msg: string) => this.broadcast({ type: "event", tabId, event: { type: "note", text: msg } });
+      note(cloudCmd[1] ? "Bringing the cloud's work back…" : "Sending this task to a Claude cloud session: writing the hand-off, saving the work to a branch…");
+      void (cloudCmd[1] ? this.cloudBack(tabId) : this.cloud(tabId))
+        .then((r) => note("url" in r && r.url ? `${r.note} Follow it on your phone in the Claude app, or at ${r.url}` : r.note))
+        .catch((err) => note(`/cloud: ${(err as Error).message}`));
+      return;
+    }
+    if (this.cloudOf(t)) throw new Error("This tab's task is running in the cloud. Use Continue here (or /cloud back) to bring it back first, or open a new tab.");
     const [cmd, ...rest] = text.trim().split(/\s+/);
     const msg = expandShortcut(cmd, rest.join(" ")) ?? text;
     const prompt = msg + mentionNote(mentions ?? parseMentions(text));

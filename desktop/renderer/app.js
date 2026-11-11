@@ -848,6 +848,31 @@ api.onTabs((list) => {
 });
 api.onFocusTab((id) => tabs.has(id) && activate(id));
 
+/** While a tab's task runs in a Claude cloud session: where it is, and a way to bring it back. */
+function renderCloudBar(s) {
+  const bar = $("cloudBar");
+  const c = s?.info?.cloud;
+  bar.hidden = !c;
+  $("composerWrap").classList.toggle("cloud-locked", !!c);
+  if (!c) return;
+  bar.textContent = "";
+  const txt = el("span", "cb-text");
+  txt.append(el("span", "label-mono", "In the cloud"), document.createTextNode(` Running on branch `), el("code", "", c.branch), document.createTextNode(c.inTerminal ? ". Its link is in the terminal window that opened." : ". Follow it in the Claude app on your phone."));
+  bar.appendChild(txt);
+  if (c.url) {
+    const open = el("button", "btn sm", "Open session");
+    open.onclick = () => window.open(c.url, "_blank");
+    bar.appendChild(open);
+  }
+  const back = el("button", "btn sm primary", "Continue here");
+  back.title = "Fetch the cloud's branch, read what it did, and carry on in this tab";
+  back.onclick = () => {
+    back.disabled = true;
+    api.send(s.id, "/cloud back", []);
+  };
+  bar.appendChild(back);
+}
+
 // ── toolbar & status bar ───────────────────────────────────────────────────
 function syncToolbar() {
   const s = cur();
@@ -855,6 +880,7 @@ function syncToolbar() {
   const chat = s.type === "chat";
   $("toolbar").querySelector(".top-actions").hidden = !chat;
   $("composerWrap").hidden = !chat;
+  renderCloudBar(chat ? s : null);
   $("chatTitle").textContent = chat ? s.info.title : s.title;
   if (chat) {
     $("verifyBtn").classList.toggle("on", s.info.verify);

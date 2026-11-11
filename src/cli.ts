@@ -371,6 +371,9 @@ async function command(line: string): Promise<boolean> {
   // Commands that act on the app's tab when linked
   if (bridge && tabId) {
     switch (cmd) {
+      case "/cloud": // runs in the app, on this tab
+        send(arg ? `/cloud ${arg}` : "/cloud");
+        return true;
       case "/tabs":
         appTabs.forEach((t, i) => console.log(tabLine(t, i)));
         return true;
@@ -647,6 +650,9 @@ async function command(line: string): Promise<boolean> {
       console.log(hits.map((h) => `- ${h.title}  ${c.dim(h.url)}${h.section ? c.dim(`  [${h.section}]`) : ""}`).join("\n") || c.dim("No matches."));
       return true;
     }
+    case "/cloud":
+      console.log("/cloud runs from the desktop app (or a terminal linked to it with npm start while the app is open): it needs the app's tabs and approval dialog.");
+      return true;
     case "/learned": {
       const { learn, loadInstincts, effective } = await import("./instincts.js");
       const { bankFor } = await import("./projects.js");

@@ -45,6 +45,8 @@ src/engine.ts        ChatEngine (one Claude chat): turns, queue, verifier loop, 
 src/gpt-chat.ts      GptChat: the same Engine interface over Codex; transcripts in .harness/gpt-chats
 src/codex.ts         runCodex(): `codex exec --json`, parses thread/item/turn events
 src/remote.ts        /remote: MCP server (Streamable HTTP, JSON replies) on 127.0.0.1:remote.port, secret in the URL, optional cloudflared quick tunnel; tools list_tabs/send_message/get_reply/read_chat/answer_question/stop/usage
+src/instincts.ts    Self-learning: Claude Code transcripts in project folders → lessons (confidence, project/global, promotion) in .harness/instincts; instinctsBlock() goes into every chat's system prompt
+src/cloud.ts        /cloud: hand-off branch cloud/<date>-<slug> with .cloud/{context,memory}.md, claude -p --cloud, and returnFromCloud (fetch, read .cloud/progress.md, remove .cloud, delete remote branch)
 src/projects.ts     Projects (projects.yaml in the data folder): groups → projects → sub-projects; bankFor(cwd) picks the Hindsight bank, bankMcpUrl() its single-bank MCP address
 src/memory.ts        Start claude-mem (`npx claude-mem start`, doctor) and Hindsight (`docker compose up -d hindsight`) from the app; claude-mem port from ~/.claude-mem/settings.json
 src/token-stats.ts   Token usage over time for the home screen: Claude Code + Codex transcripts, cached per file
@@ -132,6 +134,12 @@ HARNESS_ALLOW_API=1 npm start         # only in containers without a subscriptio
 - Default bank = what the Hindsight coding-agent plugin uses (`coding-agent::<repo>`, worktrees → main repo, its `mapPathToBank` first). Worktrees that should have their own memory get a `mapPathToBank` entry in `~/.hindsight/coding-agent.json` and `bank:` in projects.yaml, so Claude Code and the harness agree.
 - Seeding a repo into Hindsight: `node ~/.hindsight/coding-agents/dist/hindsight-seed.js seed --repo <dir>`. Hindsight's LLM on the Mac is `claude-code` (subscription). Renaming a bank id in place: `hindsight-admin rename-bank --from <id> --to <id>`.
 - Memory probe fix: the sidebar showed Hindsight as stopped while it was busy, because the check followed the UI's redirect to a slow dashboard with a 1.2s limit. It no longer follows redirects and waits 3s.
+
+## Self-learning and /cloud (2026-11-11)
+
+- Learning was run for real once on the owner's Mac (Haiku 5.5, 8 s for one chat). Its first lessons came from Hindsight's automated repo survey, so sessions whose first message is an instruction to the agent are now skipped (`AUTOMATED` in instincts.ts) and those two lessons were removed.
+- /cloud is tested end to end against a local bare repo standing in for GitHub and a fake `claude` (`test/fixtures/fake-claude-cloud.mjs`). Not yet run against real Claude cloud: `claude -p --output-format json --cloud "<task>"` creating a new session is assumed; if it doesn't return a session id, the harness opens `claude --cloud` in a terminal window instead.
+- Cloud sessions need GitHub connected for claude.ai/code (GitHub App or `/web-setup`), and on Team/Enterprise the org's `allow_remote_sessions`.
 
 ## Open bugs
 

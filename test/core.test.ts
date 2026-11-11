@@ -850,3 +850,87 @@ test("instincts: learn from quiet project chats, confidence rules, promotion, an
     delete process.env.CLAUDE_CONFIG_DIR;
   }
 });
+
+test("/cloud: branch, secrets, public repos, send to the cloud and bring the work back", async () => {
+  const C = await import("../src/cloud.js");
+  const { loadConfig } = await import("../src/config.js");
+  const { execFileSync } = await import("node:child_process");
+  const { readFileSync, existsSync } = await import("node:fs");
+  assert.equal(C.cloudBranchName("Fix the login bug in auth.ts!", new Date(2026, 10, 10)), "cloud/2026-11-10-fix-the-login-bug-in-auth");
+  const scrubbed = C.scrubSecrets("key sk-ant-abcdefghijklmnopqrstu and ghp_abcdefghijklmnopqrstuvwxyz12 password: hunter2xyz https://me:pw123@github.com/x");
+  assert.doesNotMatch(scrubbed, /sk-ant-abc|ghp_abc|hunter2xyz|pw123/);
+  assert.deepEqual(C.parseCloudStart('noise\n{"ok":true,"session_id":"session_a","url":"https://claude.ai/code/session_a"}'), { sessionId: "session_a", url: "https://claude.ai/code/session_a" });
+  assert.deepEqual(C.parseCloudStart("Session ID: session_b\nView: https://claude.ai/code/session_b?from=cli"), { sessionId: "session_b", url: "https://claude.ai/code/session_b?from=cli" });
+  const fakeFetch = (pub: boolean) => (async (url: string) => (String(url).includes("api.github.com") ? new Response(JSON.stringify({ private: !pub }), { status: pub ? 200 : 404 }) : new Response("{}", { status: 500 }))) as unknown as typeof fetch;
+  assert.equal(await C.isPublicRepo("o", "r", fakeFetch(true)), true);
+  assert.equal(await C.isPublicRepo("o", "r", fakeFetch(false)), false);
+
+  // A repo whose "GitHub" origin is really a local bare repo.
+  const base = mkdtempSync(join(tmpdir(), "cloud-"));
+  const bare = join(base, "remote.git");
+  const work = join(base, "work");
+  const g = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
+  execFileSync("git", ["init", "-q", "--bare", "-b", "main", bare]);
+  execFileSync("git", ["init", "-q", "-b", "main", work]);
+  g(work, "config", "user.email", "t@example.com");
+  g(work, "config", "user.name", "T");
+  g(work, "config", `url.${bare}.insteadOf`, "https://github.com/me/proj.git");
+  g(work, "remote", "add", "origin", "https://github.com/me/proj.git");
+  writeFileSync(join(work, "a.txt"), "one\n");
+  g(work, "add", "-A");
+  g(work, "commit", "-q", "-m", "first");
+  g(work, "push", "-q", "-u", "origin", "main");
+  // Unfinished work, plus a .env that must never be committed.
+  writeFileSync(join(work, "a.txt"), "one\ntwo (unfinished)\n");
+  writeFileSync(join(work, ".env"), "TOKEN=abc\n");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  cfg.memory.hindsight_mcp = "http://127.0.0.1:9/mcp/"; // nothing there: memory export degrades gracefully
+  process.env.HARNESS_CLAUDE_BIN = join(process.cwd(), "test", "fixtures", "fake-claude-cloud.mjs");
+  process.env.FAKE_CLAUDE_LOG = join(base, "claude.log");
+  const asked: string[] = [];
+  const yes = async (q: string) => (asked.push(q), "y");
+  try {
+    // Push not approved: nothing changes locally.
+    await assert.rejects(C.sendToCloud(cfg, work, "Finish the feature", "Done: step 1. Left: step 2.", async () => "n", async () => true, { fetcher: fakeFetch(false) }), /not approved/);
+    assert.equal(g(work, "rev-parse", "--abbrev-ref", "HEAD"), "main");
+    assert.match(readFileSync(join(work, "a.txt"), "utf8"), /unfinished/);
+    assert.ok(!existsSync(join(work, ".cloud")));
+
+    const r = await C.sendToCloud(cfg, work, "Finish the feature", "Done: step 1. Left: step 2.", yes, async () => true, { fetcher: fakeFetch(false), now: new Date(2026, 10, 10) });
+    assert.equal(r.branch, "cloud/2026-11-10-finish-the-feature");
+    assert.equal(r.sessionId, "session_test123");
+    assert.equal(g(work, "rev-parse", "--abbrev-ref", "HEAD"), "main"); // the Mac is back on its branch
+    const files = g(bare, "show", "--name-only", "--format=", r.branch).split("\n");
+    assert.ok(files.includes("a.txt") && files.includes(".cloud/context.md") && files.includes(".cloud/memory.md"));
+    assert.ok(!files.includes(".env"), ".env must never be pushed");
+    assert.match(asked[0], /Push the branch cloud\/2026-11-10-finish-the-feature/);
+    const claudeArgs = JSON.parse(readFileSync(join(base, "claude.log"), "utf8").trim().split("\n").pop()!);
+    assert.deepEqual(claudeArgs.slice(0, 4), ["-p", "--output-format", "json", "--cloud"]);
+    assert.match(claudeArgs[4], /read \.cloud\/context\.md/);
+
+    // The cloud works on the branch and writes its progress.
+    const cloudClone = join(base, "cloud");
+    execFileSync("git", ["clone", "-q", "-b", r.branch, bare, cloudClone]);
+    g(cloudClone, "config", "user.email", "c@example.com");
+    g(cloudClone, "config", "user.name", "C");
+    writeFileSync(join(cloudClone, "a.txt"), "one\ntwo\nthree\n");
+    writeFileSync(join(cloudClone, ".cloud", "progress.md"), "Finished step 2. Left: nothing.");
+    g(cloudClone, "commit", "-q", "-am", "Finish step 2");
+    g(cloudClone, "add", "-A");
+    g(cloudClone, "commit", "-q", "-m", "Progress");
+    g(cloudClone, "push", "-q");
+
+    // Back on the Mac.
+    const back = await C.returnFromCloud(r, yes);
+    assert.equal(g(work, "rev-parse", "--abbrev-ref", "HEAD"), r.branch);
+    assert.equal(readFileSync(join(work, "a.txt"), "utf8"), "one\ntwo\nthree\n");
+    assert.ok(!existsSync(join(work, ".cloud")), ".cloud/ is removed");
+    assert.match(back.summary, /Finished step 2/);
+    assert.match(back.summary, /- Finish step 2/);
+    assert.equal(g(bare, "branch", "--list", r.branch), "", "the branch is deleted on the remote");
+  } finally {
+    delete process.env.HARNESS_CLAUDE_BIN;
+    delete process.env.FAKE_CLAUDE_LOG;
+  }
+});

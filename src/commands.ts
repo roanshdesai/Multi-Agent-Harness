@@ -48,6 +48,7 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
   { name: "/computer", args: "test | <task>", description: "Computer use with GPT through Codex: \"test\" checks it can see the screen; or give it a task", group: "Team" },
   { name: "/caffeinate", args: "[off | 30m | 2h | display]", description: "Keep the computer awake (like macOS caffeinate)", group: "Harness" },
   { name: "/remote", description: "Control this app from another app (e.g. Pally) through an MCP link", group: "Harness" },
+  { name: "/cloud", args: "[back]", description: "Send this task to a Claude cloud session (follow it on your phone); 'back' continues its work here", group: "Harness" },
   { name: "/handoff", description: "Write a context.md summary of this chat and continue in a new chat from it", group: "Harness" },
   { name: "/models", description: "Choose the model for each role and what the model picker offers", group: "Harness" },
   { name: "/model", args: "[id]", description: "Change this tab's model, Claude or GPT", group: "Harness" },
