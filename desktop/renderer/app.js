@@ -13,6 +13,8 @@ let docs = [];
 let agents = [];
 let connState = [];
 let memStatus = null;
+/** Paths of files attached to the next message. Files from disk stay where they are; pasted images are saved to the data folder. */
+const attachments = [];
 /** Lessons learned about how you work (self-learning), for the current project and all projects. */
 let learned = null;
 let usageState = null;
@@ -2340,7 +2342,7 @@ function removeFrom(list, path) {
 function autoSize() {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, 220) + "px";
-  $("sendBtn").disabled = !input.value.trim();
+  $("sendBtn").disabled = !input.value.trim() && !attachments.length;
   $("changeBtn").disabled = !input.value.trim();
 }
 // ── @apps: name a connected MCP server in a message ───────────────────────
@@ -2423,10 +2425,71 @@ function pickSlash(c) {
   autoSize();
   input.focus();
 }
+// ── attachments ────────────────────────────────────────────────────────────
+function renderAttachments() {
+  const row = $("attachRow");
+  row.textContent = "";
+  row.hidden = !attachments.length;
+  attachments.forEach((p, i) => {
+    const chip = el("span", "attach-chip");
+    chip.title = p;
+    const x = el("button", "attach-x", "×");
+    x.title = "Remove";
+    x.onclick = () => (attachments.splice(i, 1), renderAttachments());
+    chip.append(el("span", "", folderName(p)), x);
+    row.appendChild(chip);
+  });
+  autoSize();
+}
+function addAttachments(paths) {
+  for (const p of paths) if (p && !attachments.includes(p) && attachments.length < 20) attachments.push(p);
+  renderAttachments();
+  input.focus();
+}
+/** A File from a drop or paste: its real path if it has one, otherwise saved to the data folder. */
+async function fileToPath(f) {
+  const p = api.pathForFile(f);
+  if (p) return p;
+  const ext = (f.type.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "");
+  return api.saveUpload(f.name || `pasted.${ext}`, await f.arrayBuffer());
+}
+$("attachBtn").onclick = async () => addAttachments(await api.pickFiles());
+const composerEl = $("composer");
+composerEl.addEventListener("dragover", (e) => {
+  if (![...(e.dataTransfer?.types ?? [])].includes("Files")) return;
+  e.preventDefault();
+  composerEl.classList.add("drop");
+});
+composerEl.addEventListener("dragleave", () => composerEl.classList.remove("drop"));
+composerEl.addEventListener("drop", async (e) => {
+  composerEl.classList.remove("drop");
+  const files = [...(e.dataTransfer?.files ?? [])];
+  if (!files.length) return;
+  e.preventDefault();
+  addAttachments(await Promise.all(files.map(fileToPath)));
+});
+input.addEventListener("paste", async (e) => {
+  const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter(Boolean);
+  if (!files.length) return; // plain text pastes as usual
+  e.preventDefault();
+  addAttachments(await Promise.all(files.map(fileToPath)));
+});
+
 async function submit(mode = "send") {
   const text = input.value.trim();
   const s = cur();
-  if (!text || s?.type !== "chat") return;
+  if ((!text && !attachments.length) || s?.type !== "chat") return;
+  // Files attached in the composer go with a normal message (not with commands).
+  if (!text.startsWith("/") || !text) {
+    const files = attachments.splice(0);
+    renderAttachments();
+    if (files.length) {
+      input.value = "";
+      autoSize();
+      $("slashMenu").hidden = true;
+      return api.send(s.id, text, mentionsIn(text), files).catch((err) => addNote(s, String(err.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), "error"));
+    }
+  }
   input.value = "";
   autoSize();
   $("slashMenu").hidden = true;

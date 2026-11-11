@@ -966,3 +966,33 @@ test("/fast: GPT tabs run Codex on the priority tier; Claude tabs say it isn't a
     delete process.env.FAKE_CODEX_LOG;
   }
 });
+
+test("attachments: files go to the model as paths; the chat shows their names; missing files are dropped", async () => {
+  process.env.HARNESS_CODEX_BIN = join(process.cwd(), "test", "fixtures", "fake-codex.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "att-"));
+  const log = join(dir, "codex.log");
+  process.env.FAKE_CODEX_LOG = log;
+  const { readFileSync } = await import("node:fs");
+  const { Host } = await import("../src/host.js");
+  const { loadConfig } = await import("../src/config.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const host = new Host(cfg, () => async () => "n");
+  const events: any[] = [];
+  host.listen((m) => m.type === "event" && events.push(m.event));
+  const img = join(dir, "shot.png");
+  writeFileSync(img, "png");
+  try {
+    const gpt = host.createTab({ windowId: 1, model: "gpt-6-astra" });
+    host.send(gpt.id, "what's wrong here?", "app", [], [img, join(dir, "gone.pdf")]);
+    await new Promise<void>((r) => { const t = setInterval(() => { try { if (readFileSync(log, "utf8").includes("shot.png")) { clearInterval(t); r(); } } catch {} }, 20); });
+    const prompt = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)).find((a) => a.join(" ").includes("shot.png")).at(-1);
+    assert.match(prompt, /what's wrong here\?/);
+    assert.ok(prompt.includes(`- ${img}`));
+    assert.doesNotMatch(prompt, /gone\.pdf/); // files that don't exist are left out
+    assert.equal(events.find((e) => e.type === "user").text, "what's wrong here?\n\nAttached: shot.png");
+  } finally {
+    delete process.env.HARNESS_CODEX_BIN;
+    delete process.env.FAKE_CODEX_LOG;
+  }
+});

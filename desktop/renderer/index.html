@@ -72,10 +72,12 @@
         <footer class="composer-wrap" id="composerWrap">
           <div class="slash-menu" id="slashMenu" role="listbox" hidden></div>
           <div class="composer" id="composer">
-            <textarea id="input" rows="1" placeholder="Describe the task. / for commands, @ for apps" autofocus></textarea>
+            <div class="attach-row" id="attachRow" hidden></div>
+            <textarea id="input" rows="1" placeholder="Describe the task. / for commands, @ for apps. Drop or paste files to attach." autofocus></textarea>
             <div class="composer-bar">
               <span class="hint" id="hint"></span>
               <div class="composer-actions">
+                <button class="text-btn" id="attachBtn" title="Attach files (or drop them here, or paste an image)">attach</button>
                 <button class="text-btn" id="changeBtn" hidden title="Correct the running task now (⌘Enter)">change now</button>
                 <button class="text-btn danger" id="stopBtn" hidden title="Stop">stop</button>
                 <button class="send" id="sendBtn" title="Send (Enter)">Send</button>

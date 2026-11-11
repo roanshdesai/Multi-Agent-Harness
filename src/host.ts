@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type { HarnessConfig } from "./config.js";
 import { Harness } from "./session.js";
-import { ChatEngine, expandShortcut, mentionNote, parseMentions, type ChatEvent, type ChatSummary, type Engine, type HistoryItem } from "./engine.js";
+import { ChatEngine, attachmentNote, expandShortcut, mentionNote, parseMentions, type ChatEvent, type ChatSummary, type Engine, type HistoryItem } from "./engine.js";
 import { GptChat, listGptChats, isGptChat } from "./gpt-chat.js";
 import type { Ask } from "./guards.js";
 import { isExhausted, loadUsage, formatReset, type UsageSnapshot } from "./usage.js";
@@ -324,7 +324,7 @@ ${repo} is a public repository: anyone can read what's pushed. Include this proj
    * Send a message. `mentions` are MCP servers named with @ (the app resolves
    * them); without it, @names in the text are passed through as typed.
    */
-  send(tabId: string, text: string, source = "app", mentions?: string[]) {
+  send(tabId: string, text: string, source = "app", mentions?: string[], files: string[] = []) {
     const t = this.get(tabId);
     // /fast: GPT tabs only (the Claude plan here doesn't offer fast mode).
     const fastCmd = text.trim().match(/^\/fast(?:\s+(on|off))?\s*$/i);
@@ -348,8 +348,11 @@ ${repo} is a public repository: anyone can read what's pushed. Include this proj
     }
     if (this.cloudOf(t)) throw new Error("This tab's task is running in the cloud. Use Continue here (or /cloud back) to bring it back first, or open a new tab.");
     const [cmd, ...rest] = text.trim().split(/\s+/);
-    const msg = expandShortcut(cmd, rest.join(" ")) ?? text;
-    const prompt = msg + mentionNote(mentions ?? parseMentions(text));
+    // Attached files: only ones that exist, at most 20.
+    const attached = files.filter((f) => typeof f === "string" && existsSync(f)).slice(0, 20);
+    const base = expandShortcut(cmd, rest.join(" ")) ?? (text.trim() || (attached.length ? "Have a look at the attached file(s)." : text));
+    const msg = attached.length ? `${base}\n\nAttached: ${attached.map((f) => f.split(/[\\/]/).pop()).join(", ")}` : base;
+    const prompt = base + attachmentNote(attached) + mentionNote(mentions ?? parseMentions(text));
     if (t.switching) {
       t.switching.push({ text: msg, source, prompt });
       this.broadcast({ type: "event", tabId, event: { type: "user", text: msg, source, queued: true } });

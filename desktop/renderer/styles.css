@@ -484,3 +484,9 @@ body.platform-win.has-awake .titlebar, body.platform-linux.has-awake .titlebar {
 .cloud-bar .label-mono { color: var(--signal); margin-right: 6px; }
 .cloud-bar code { font-family: var(--mono); font-size: 11.5px; color: var(--ink); }
 .composer-wrap.cloud-locked { opacity: .5; pointer-events: none; }
+.attach-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
+.attach-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 240px; padding: 1px 2px 1px 7px; border: 1px solid var(--rule); border-radius: 4px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+.attach-chip > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attach-x { border: 0; background: none; color: var(--ink-3); padding: 0 4px; font-size: 13px; line-height: 1; cursor: pointer; }
+.attach-x:hover { color: var(--ink); }
+.composer.drop { border-color: var(--signal); }

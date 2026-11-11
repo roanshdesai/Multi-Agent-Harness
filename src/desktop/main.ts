@@ -439,7 +439,23 @@ ipcMain.handle("tab-new", (e, opts: { model?: string; chatId?: string; title?: s
 ipcMain.handle("tab-close", (_e, tabId: string) => host.closeTab(tabId));
 ipcMain.handle("tab-focus", (_e, tabId: string) => host.focus(tabId));
 ipcMain.handle("tab-history", (_e, tabId: string) => host.history(tabId));
-ipcMain.handle("send", (_e, tabId: string, text: string, mentions?: string[]) => host.send(tabId, text, "app", mentions));
+ipcMain.handle("send", (_e, tabId: string, text: string, mentions?: string[], files?: string[]) => host.send(tabId, text, "app", mentions, files ?? []));
+// Attaching files: pick them, or save a pasted image into the data folder.
+ipcMain.handle("pick-files", async (e) => {
+  const win = windows.get(wid(e.sender));
+  const r = await dialog.showOpenDialog(win!, { properties: ["openFile", "multiSelections"], defaultPath: process.cwd() });
+  return r.canceled ? [] : r.filePaths;
+});
+ipcMain.handle("save-upload", (_e, name: string, bytes: ArrayBuffer) => {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const dir = join(cfg.root, ".harness", "uploads", `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`);
+  mkdirSync(dir, { recursive: true });
+  const safe = (String(name || "pasted").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+/, "") || "pasted").slice(0, 80);
+  const file = join(dir, `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${safe}`);
+  writeFileSync(file, Buffer.from(bytes));
+  return file;
+});
 ipcMain.handle("stop", (_e, tabId: string) => host.stop(tabId));
 ipcMain.handle("btw", (_e, tabId: string, q: string) => host.btw(tabId, q));
 ipcMain.handle("new-chat", (_e, tabId: string) => host.newChat(tabId));

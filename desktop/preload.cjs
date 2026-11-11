@@ -1,5 +1,5 @@
 // Bridge between the window and the harness. The page gets only these calls.
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 const invoke = (ch, ...args) => ipcRenderer.invoke(ch, ...args);
 const on = (ch) => (cb) => {
@@ -64,7 +64,11 @@ contextBridge.exposeInMainWorld("harness", {
   closeTab: (tabId) => invoke("tab-close", tabId),
   focusTab: (tabId) => invoke("tab-focus", tabId),
   tabHistory: (tabId) => invoke("tab-history", tabId),
-  send: (tabId, text, mentions) => invoke("send", tabId, text, mentions),
+  send: (tabId, text, mentions, files) => invoke("send", tabId, text, mentions, files),
+  pickFiles: () => invoke("pick-files"),
+  saveUpload: (name, bytes) => invoke("save-upload", name, bytes),
+  // The real path of a file dropped on the window (Electron no longer puts it on File).
+  pathForFile: (file) => { try { return webUtils.getPathForFile(file) || null; } catch { return null; } },
   stop: (tabId) => invoke("stop", tabId),
   btw: (tabId, q) => invoke("btw", tabId, q),
   newChat: (tabId) => invoke("new-chat", tabId),

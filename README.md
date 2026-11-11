@@ -59,6 +59,8 @@ Its own look, built to read like a document and an instrument:
 
 **Documents:** the Documents pane lists the project's documents (.md, .txt, .pdf, .docx…), with the files the agents opened or edited this session first and PRDs grouped together. Opening one shows it in a tab. **Summarize** (or **Summarize PRD**) gives the main points: a TL;DR, key points, requirements, and open questions. It runs on Sonnet and is cached until the file changes. `/docs` and `/summarize <file>` do the same in the terminal.
 
+**Attach files:** click **attach** in the message box, drop files on it, or paste an image. Files from your disk are referenced where they are (nothing is copied); pasted images are saved under `.harness/uploads/` in the data folder. The agent gets the paths and opens them (Claude's Read tool shows images and reads PDFs; GPT tabs view images too). Up to 20 per message.
+
 **Tabs:** every tab is its own task with its own model, so several run at once (⌘T new tab, ⌘W close, ⌘1–9 switch). A tab that's working shows a moving border.
 
 **Claude or GPT per tab:** the model picker at the top lists the Claude models your plan offers and the GPT models from your settings (ChatGPT plan, through Codex). Change any role's model, or what the picker offers, with `/models` or "Edit models…" at the bottom of the picker. Switching a tab that already has a conversation to the other family opens a new tab, since they can't share history.

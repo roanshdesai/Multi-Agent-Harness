@@ -129,6 +129,15 @@ export function mentionNote(servers: string[]): string {
   return `\n\n[The user named these connected apps: ${list}. Use their tools for this request. You may call them yourself, even though you normally delegate; if you delegate, tell the agent to use these tools. If an app isn't connected or needs sign-in, say so.]`;
 }
 
+/**
+ * Files attached to a message: the model gets their paths and is told to open
+ * them (Claude's Read tool shows images and reads PDFs; Codex views images).
+ */
+export function attachmentNote(files: string[]): string {
+  if (!files.length) return "";
+  return `\n\n[The user attached ${files.length === 1 ? "this file" : "these files"}:\n${files.map((f) => `- ${f}`).join("\n")}\nOpen ${files.length === 1 ? "it" : "each one"} before answering: the Read tool shows images and reads PDFs and text; convert .docx with textutil (macOS) first.]`;
+}
+
 export function expandShortcut(cmd: string, arg: string): string | null {
   switch (cmd) {
     case "/advisor":
