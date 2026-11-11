@@ -191,20 +191,29 @@ const stripTags = (t: string) =>
     .replace(/<(hindsight_[a-z_]+|pasted_content)[^>]*>[\s\S]*?<\/\1[^>]*>/g, "[pasted text]")
     .trim();
 
+/**
+ * Sessions started by tools rather than the owner (Hindsight's repo survey,
+ * the harness's own summaries and checks) open with an instruction to the
+ * agent. Their "user" isn't the owner, so there's nothing to learn from them.
+ */
+export const AUTOMATED = /^\s*(you are (a|an|the|performing)\b|read the document at |you read a conversation between)/i;
+
 export interface Turn {
   role: "user" | "assistant";
   text: string;
 }
 
 /** The conversation in a Claude Code transcript from line `from` on: the owner's words and the agent's replies. */
-export async function readTranscript(file: string, from = 0): Promise<{ turns: Turn[]; lines: number; cwd: string | null }> {
+export async function readTranscript(file: string, from = 0): Promise<{ turns: Turn[]; lines: number; cwd: string | null; automated: boolean }> {
   const turns: Turn[] = [];
+  let automated = false;
+  let sawUser = false;
   let lines = 0;
   let cwd: string | null = null;
   const rl = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of rl) {
     lines++;
-    if (lines <= from || !line.startsWith("{")) continue;
+    if (!line.startsWith("{") || (lines <= from && sawUser)) continue;
     let o: { type?: string; cwd?: string; isSidechain?: boolean; isMeta?: boolean; message?: { content?: unknown } };
     try {
       o = JSON.parse(line);
@@ -216,12 +225,17 @@ export async function readTranscript(file: string, from = 0): Promise<{ turns: T
     const c = o.message?.content;
     const parts = typeof c === "string" ? [c] : Array.isArray(c) ? c.filter((x) => x?.type === "text").map((x) => String(x.text ?? "")) : [];
     for (const p of parts) {
+      if (o.type === "user" && !sawUser && !NOISE.test(p)) {
+        sawUser = true;
+        if (AUTOMATED.test(p)) automated = true; // judged on the session's first real message
+      }
+      if (lines <= from) continue;
       if (NOISE.test(p)) continue;
       const text = stripTags(p);
       if (text) turns.push({ role: o.type as "user" | "assistant", text: text.slice(0, 2000) });
     }
   }
-  return { turns, lines, cwd };
+  return { turns: automated ? [] : turns, lines, cwd, automated };
 }
 
 /** The extraction prompt for one chunk of conversation. */

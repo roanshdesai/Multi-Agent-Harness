@@ -837,6 +837,13 @@ test("instincts: learn from quiet project chats, confidence rules, promotion, an
     for (let n = 0; n < 12; n++) I.saveInstinct(cfg, "bank-p", { id: `x${n}`, trigger: `t${n}`, action: `a${n}`, evidence: [], confidence: 0.7 + (n % 3) / 10, scope: "project", project: "bank-p", created: Date.now(), last_seen: Date.now(), hits: 1 });
     assert.equal(I.strongInstincts(cfg, proj).length, I.INJECT_MAX);
     assert.ok(I.strongInstincts(cfg, proj)[0].confidence >= 0.89);
+    // Sessions a tool started (e.g. Hindsight's repo survey) are skipped.
+    const auto = join(tdir, "s2.jsonl");
+    writeFileSync(auto, [line("user", "You are performing a one-time structural survey of THIS repository"), line("user", "never read CLAUDE.md")].join("\n"));
+    utimesSync(auto, old, old);
+    const before = prompts.length;
+    assert.equal((await I.learn(cfg, fake)).read, 0);
+    assert.equal(prompts.length, before);
     cfg.learning.enabled = false;
     assert.equal(I.instinctsBlock(cfg, proj), "");
   } finally {
