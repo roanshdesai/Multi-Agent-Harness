@@ -14,6 +14,7 @@ import type { HarnessConfig } from "./config.js";
 import { buildAgents } from "./agents.js";
 import { designPrompt, normalize, SUBAGENT_SCHEMA, type CustomSubagent } from "./subagents.js";
 import { buildExternalMcp } from "./mcp.js";
+import { contextBlock } from "./project-context.js";
 import { instinctsBlock, OBSERVATION_SCHEMA, type Observation } from "./instincts.js";
 import { designLibraryTool } from "./tools/design-library.js";
 import { computerUseTool } from "./tools/computer.js";
@@ -170,6 +171,24 @@ export interface TurnHooks {
   onContext?: (c: ContextInfo) => void;
 }
 
+/**
+ * The Claude models for the picker, by full id. Claude Code lists some models
+ * only under an alias ("sonnet" → claude-sonnet-5-5, named "Sonnet 5.5"), so an
+ * alias's name is kept unless the model also has its own row. The "default"
+ * row names a slot ("Default (recommended)"), not a model, so its name isn't used.
+ */
+export function pickerModels(list: { value: string; displayName: string; resolvedModel?: string }[]): { value: string; displayName: string }[] {
+  const seen = new Map<string, { value: string; displayName: string; own: boolean }>();
+  for (const m of list) {
+    const value = m.resolvedModel ?? m.value;
+    const own = m.value === value;
+    const name = m.value === "default" ? "" : m.displayName;
+    const prev = seen.get(value);
+    if (!prev || (own && !prev.own) || (!prev.displayName && name)) seen.set(value, { value, displayName: own || !prev?.own ? name || prev?.displayName || "" : prev.displayName, own: own || !!prev?.own });
+  }
+  return [...seen.values()].map(({ value, displayName }) => ({ value, displayName }));
+}
+
 export class Harness {
   readonly mcpSkipped: string[];
   readonly plugins: SdkPluginConfig[];
@@ -258,7 +277,7 @@ export class Harness {
       fallbackModel: cfg.models.fallback.join(","),
       effort: cfg.effort.main,
       // Plus what it has learned about how the user works in this project (instincts.ts).
-      systemPrompt: { type: "preset", preset: "claude_code", append: ORCHESTRATOR_PROMPT + instinctsBlock(cfg, this.cwd) },
+      systemPrompt: { type: "preset", preset: "claude_code", append: ORCHESTRATOR_PROMPT + instinctsBlock(cfg, this.cwd) + contextBlock(cfg, this.cwd) },
       agents: buildAgents(cfg),
       // Hindsight is scoped to this harness's folder: each project has its own memory bank.
       mcpServers: { harness: local, ...buildExternalMcp(cfg, { cwd: this.cwd }).servers, ...loadCustomServers(cfg) },
@@ -314,14 +333,7 @@ export class Harness {
         /* keep the built-in list */
       }
       try {
-        const seen = new Map<string, { value: string; displayName: string }>();
-        for (const m of await q.supportedModels()) {
-          const value = m.resolvedModel ?? m.value;
-          // An alias row ("default", "opus") names the slot, not the model; prefer the model's own row.
-          const own = m.value === value;
-          if (!seen.has(value) || own) seen.set(value, { value, displayName: own ? m.displayName : (seen.get(value)?.displayName ?? "") });
-        }
-        this.availableModels = [...seen.values()];
+        this.availableModels = pickerModels(await q.supportedModels());
       } catch {
         /* the picker falls back to the models in the config */
       }

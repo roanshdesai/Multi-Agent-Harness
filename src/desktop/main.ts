@@ -19,6 +19,7 @@ import { RemoteControl } from "../remote.js";
 import { runComputerUse, COMPUTER_TEST_PROMPT } from "../tools/computer.js";
 import { parseCaffeinate, type CaffeinateStatus } from "../caffeinate.js";
 import { claudeMemUrls, startClaudeMem, claudeMemDoctor, startHindsight } from "../memory.js";
+import { loadContext, saveContext, type ProjectContext } from "../project-context.js";
 import { learn, loadInstincts, saveInstinct, effective, type Instinct } from "../instincts.js";
 import { loadProjects, saveProjects, flattenProjects, projectFor, bankFor, defaultBank, bankPageUrl, folderExists, type Project, type ProjectsFile } from "../projects.js";
 import { listDocs, readDoc, summarizeDoc, cachedSummary } from "../docs.js";
@@ -334,6 +335,19 @@ ipcMain.handle("instinct-save", (_e, inst: Instinct, remove?: boolean) => {
   return true;
 });
 ipcMain.handle("learn-now", () => runLearning());
+// Project context (pinned files and links), for the folder agents work in.
+ipcMain.handle("context-get", () => {
+  const cwd = process.cwd();
+  const ctx = loadContext(cfg, cwd);
+  const proj = projectFor(loadProjects(cfg), cwd);
+  return { project: proj?.name ?? null, folder: cwd, files: ctx.files.map((f) => ({ path: f, exists: folderExists(f) })), links: ctx.links };
+});
+// Open a pinned file in its default app, only if it's pinned to the current project.
+ipcMain.handle("open-file", (_e, path: string) => {
+  if (!loadContext(cfg, process.cwd()).files.includes(path)) return "not pinned";
+  return shell.openPath(path);
+});
+ipcMain.handle("context-save", (_e, ctx: ProjectContext) => saveContext(cfg, process.cwd(), ctx));
 ipcMain.handle("pick-folder", async (e) => {
   const win = windows.get(wid(e.sender));
   const r = await dialog.showOpenDialog(win!, { properties: ["openDirectory"], defaultPath: process.cwd() });

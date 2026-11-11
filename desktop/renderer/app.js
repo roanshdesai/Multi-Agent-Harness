@@ -42,6 +42,7 @@ const ICONS = {
   doc: "M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6",
   db: "M5 6c0 1.7 3.1 3 7 3s7-1.3 7-3-3.1-3-7-3-7 1.3-7 3zM5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6",
   plus: "M12 5v14M5 12h14",
+  link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
   x: "M6 6l12 12M18 6L6 18",
   check: "M5 12.5l4.5 4.5L19 7.5",
   chevD: "M6 9l6 6 6-6",
@@ -451,10 +452,44 @@ function who(kind, label, extra, time) {
   if (extra) w.append(el("span", "src", extra));
   return w;
 }
+// ── copy ───────────────────────────────────────────────────────────────────
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const was = btn.textContent;
+    btn.textContent = "Copied";
+    btn.classList.add("done");
+    setTimeout(() => ((btn.textContent = was), btn.classList.remove("done")), 1400);
+  } catch {
+    btn.textContent = "Couldn't copy";
+  }
+}
+/** A Copy action under a message; copies the message's original text (markdown for replies). */
+function addCopy(m, text) {
+  m.querySelector(":scope > .msg-actions")?.remove();
+  const row = el("div", "msg-actions");
+  const b = el("button", "text-btn", "Copy");
+  b.title = "Copy this message";
+  b.onclick = () => copyText(text, b);
+  row.appendChild(b);
+  m.appendChild(row);
+}
+/** A copy button on each code block in a rendered reply. */
+function decorateCode(bubble) {
+  for (const pre of bubble.querySelectorAll("pre")) {
+    if (pre.querySelector(".code-copy")) continue;
+    const b = el("button", "code-copy", "Copy");
+    b.title = "Copy this code";
+    b.onclick = () => copyText(pre.querySelector("code")?.innerText ?? pre.innerText, b);
+    pre.appendChild(b);
+  }
+}
+
 function addUser(s, text, source, queued, change, live = true) {
   const m = el("div", `msg user${change ? " change" : ""}`);
   m.append(who("user", "You", change ? "correction, mid-task" : source === "terminal" ? "from the terminal" : source === "auto" ? "re-sent automatically" : queued ? "queued" : "", live ? clock() : ""));
   m.append(el("div", "bubble", text));
+  addCopy(m, text);
   append(s, m);
   s.view.scrollTop = s.view.scrollHeight;
 }
@@ -469,6 +504,8 @@ function assistantShell(s) {
 function addAssistant(s, text) {
   const { m, b } = assistantShell(s);
   b.innerHTML = md(text);
+  decorateCode(b);
+  addCopy(m, text);
   append(s, m);
 }
 // ── "working…" line: what the agent is doing right now, until the reply arrives ──
@@ -533,6 +570,9 @@ function endLive(s, finalText) {
   s.liveText = finalText ?? s.liveText;
   flushLive(s);
   s.live.classList.remove("streaming");
+  decorateCode(s.live);
+  const msg = s.live.closest(".msg");
+  if (msg && s.liveText) addCopy(msg, s.liveText);
   s.live = null;
   s.liveText = "";
 }
@@ -1016,7 +1056,7 @@ function buildModelSelect() {
   const claude = el("optgroup");
   claude.label = "Claude · your Claude plan";
   // Your list from /models; if empty, everything your plan offers; always the current main model.
-  const names = new Map((info.availableModels ?? []).filter((m) => m.displayName).map((m) => [m.value, m.displayName]));
+  const names = new Map((info.availableModels ?? []).map((m) => [m.value, m.displayName || shortModel(m.value)]));
   const mine = info.models.claude?.length ? info.models.claude : [...names.keys()];
   const curModel = cur()?.info?.model;
   for (const m of [...new Set([info.models.main, ...mine, ...(curModel && !isGpt(curModel) ? [curModel] : [])])]) {
@@ -2028,6 +2068,97 @@ function showHelp() {
 }
 
 // ── btw ────────────────────────────────────────────────────────────────────
+// ── project context (pinned files and links) ──────────────────────────────
+let ctxState = null;
+async function refreshContext() {
+  if ($("ctxPanel").hidden) return;
+  ctxState = await api.projectContext();
+  renderContext();
+}
+async function saveContext(next) {
+  await api.saveProjectContext(next);
+  await refreshContext();
+}
+function plainContext() {
+  return { files: ctxState.files.map((f) => f.path), links: ctxState.links.map((l) => ({ ...l })) };
+}
+function renderContext() {
+  const body = $("ctxBody");
+  body.textContent = "";
+  if (!ctxState) return;
+  $("ctxSub").textContent = `${ctxState.project ? `${ctxState.project}: e` : "E"}very chat in this ${ctxState.project ? "project" : "folder"} gets these files and links, and agents open them when they're relevant.`;
+  const remove = (fn) => {
+    const x = el("button", "x", "×");
+    x.title = "Unpin";
+    x.onclick = (e) => (e.stopPropagation(), fn());
+    return x;
+  };
+  section(body, "ctx:files", "Files", ctxState.files.length, () => {
+    for (const f of ctxState.files) {
+      const r = el("button", `row${f.exists ? "" : " missing"}`);
+      const st = el("span", "stack");
+      st.append(el("span", "t", folderName(f.path)), el("span", "sub", f.exists ? shortPath(f.path) : "not found"));
+      r.append(icon("doc"), st, remove(() => saveContext({ ...plainContext(), files: plainContext().files.filter((p) => p !== f.path) })));
+      r.title = f.path;
+      // Project documents open in a tab; anything else opens in its own app.
+      r.onclick = async () => {
+        if (!f.exists) return;
+        const viewable = await api.readDoc(f.path).then(() => true, () => false);
+        viewable ? openDoc(f.path) : api.openFile(f.path);
+      };
+      body.appendChild(r);
+    }
+    const drop = el("div", "ctx-drop", "Drop files here, or ");
+    const pick = el("button", "link-btn", "choose files");
+    pick.onclick = async () => {
+      const paths = await api.pickFiles();
+      if (paths.length) saveContext({ ...plainContext(), files: [...plainContext().files, ...paths] });
+    };
+    drop.appendChild(pick);
+    drop.addEventListener("dragover", (e) => (e.preventDefault(), drop.classList.add("drop")));
+    drop.addEventListener("dragleave", () => drop.classList.remove("drop"));
+    drop.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      drop.classList.remove("drop");
+      const paths = (await Promise.all([...(e.dataTransfer?.files ?? [])].map(fileToPath))).filter(Boolean);
+      if (paths.length) saveContext({ ...plainContext(), files: [...plainContext().files, ...paths] });
+    });
+    body.appendChild(drop);
+  });
+  section(body, "ctx:links", "Links", ctxState.links.length, () => {
+    for (const l of ctxState.links) {
+      const r = el("button", "row");
+      const st = el("span", "stack");
+      st.append(el("span", "t", l.title || l.url.replace(/^https?:\/\//, "")), el("span", "sub", l.url));
+      r.append(icon("link"), st, remove(() => saveContext({ ...plainContext(), links: plainContext().links.filter((x) => x.url !== l.url) })));
+      r.title = l.url;
+      r.onclick = () => window.open(l.url, "_blank");
+      body.appendChild(r);
+    }
+    const form = el("div", "ctx-add");
+    const url = el("input", "input");
+    url.placeholder = "https://… (docs, Figma, issue, spec)";
+    const title = el("input", "input");
+    title.placeholder = "Name (optional)";
+    const add = el("button", "btn sm", "Add link");
+    const go = () => {
+      const u = url.value.trim();
+      if (!/^https?:\/\/\S+$/i.test(u)) return url.focus();
+      saveContext({ ...plainContext(), links: [...plainContext().links, { url: u, ...(title.value.trim() && { title: title.value.trim() }) }] });
+    };
+    add.onclick = go;
+    url.onkeydown = title.onkeydown = (e) => e.key === "Enter" && go();
+    form.append(url, title, add);
+    body.appendChild(form);
+  });
+}
+$("ctxBtn").onclick = () => {
+  $("ctxPanel").hidden = !$("ctxPanel").hidden;
+  $("ctxBtn").classList.toggle("on", !$("ctxPanel").hidden);
+  refreshContext();
+};
+$("ctxClose").onclick = () => (($("ctxPanel").hidden = true), $("ctxBtn").classList.remove("on"));
+
 function openBtw() {
   $("btwPanel").hidden = false;
   $("btwInput").focus();
@@ -2095,6 +2226,7 @@ async function workspaceChanged(ws) {
   await refreshChats();
   refreshDocs();
   refreshMemory();
+  refreshContext();
   refreshWelcomes();
 }
 $("sbFolder").onclick = async () => {
@@ -2577,12 +2709,36 @@ async function submit(mode = "send") {
     case "/verify":
       await api.setVerify(s.id, arg !== "off");
       return addNote(s, `Verifier ${arg === "off" ? "off" : "on"} for this tab.`);
-    case "/model":
-      if (arg) {
-        $("modelSelect").value = arg;
+    case "/model": {
+      // Every model the picker offers (Claude and GPT), by id and name.
+      const opts = [...$("modelSelect").options].filter((o) => o.value && !o.value.startsWith("__")).map((o) => ({ value: o.value, label: o.textContent }));
+      const pick = (m) => {
+        $("modelSelect").value = m;
         $("modelSelect").dispatchEvent(new Event("change"));
+      };
+      if (!arg) {
+        const box = el("div", "model-list");
+        box.appendChild(el("p", "muted", `This tab runs on ${shortModel(s.info.model)}. Pick another:`));
+        for (const o of opts) {
+          const b = el("button", `row${o.value === s.info.model ? " active" : ""}`);
+          b.append(el("span", "t", o.label), el("span", "rmeta", isGpt(o.value) ? "ChatGPT plan" : "Claude plan"));
+          b.onclick = () => (($("modal").hidden = true), pick(o.value));
+          box.appendChild(b);
+        }
+        return modal("Model", box);
       }
-      return addNote(s, `This tab runs on ${shortModel(arg || s.info.model)}.`);
+      // "sonnet", "Sonnet 5.5", "fable 5.2", "gpt astra", or a full id.
+      const norm = (x) => x.toLowerCase().replace(/^claude[-\s]*/, "").replace(/[^a-z0-9]+/g, "");
+      const q = norm(arg);
+      const hit =
+        opts.find((o) => o.value === arg) ??
+        opts.find((o) => norm(o.value) === q || norm(o.label) === q) ??
+        opts.find((o) => norm(o.label).startsWith(q) || norm(o.value).startsWith(q)) ??
+        opts.find((o) => norm(o.label).includes(q) || norm(o.value).includes(q));
+      if (!hit) return addNote(s, `No model matches "${arg}". You can pick: ${opts.map((o) => o.label).join(", ")}.`);
+      pick(hit.value);
+      return addNote(s, `This tab now runs on ${hit.label}.`);
+    }
   }
   api.send(s.id, text, mentionsIn(text));
 }

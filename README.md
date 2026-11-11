@@ -59,6 +59,10 @@ Its own look, built to read like a document and an instrument:
 
 **Documents:** the Documents pane lists the project's documents (.md, .txt, .pdf, .docx…), with the files the agents opened or edited this session first and PRDs grouped together. Opening one shows it in a tab. **Summarize** (or **Summarize PRD**) gives the main points: a TL;DR, key points, requirements, and open questions. It runs on Sonnet and is cached until the file changes. `/docs` and `/summarize <file>` do the same in the terminal.
 
+**Project context:** the **context** button by the model picker opens a side panel, like a Claude project's files and links. Pin files (choose or drop them) and links to the current project; every chat in it gets the list, and agents open what's relevant. Stored per project under `.harness/context/`.
+
+**Copy:** hover a message for **Copy** (replies copy as markdown); code blocks have their own copy button.
+
 **Attach files:** click **attach** in the message box, drop files on it, or paste an image. Files from your disk are referenced where they are (nothing is copied); pasted images are saved under `.harness/uploads/` in the data folder. The agent gets the paths and opens them (Claude's Read tool shows images and reads PDFs; GPT tabs view images too). Up to 20 per message.
 
 **Tabs:** every tab is its own task with its own model, so several run at once (⌘T new tab, ⌘W close, ⌘1–9 switch). A tab that's working shows a moving border.
@@ -115,6 +119,7 @@ Name a connected app with `@` anywhere in a message, for example `@pally find my
 | `/cloud` / `/cloud back` | Leaving your desk: sends this tab's task to a Claude cloud session. Your unfinished work goes to a new `cloud/…` branch with a hand-off note and the project's memory (secrets removed; asks first for public repos), the push asks for approval, and the Mac goes back to your branch. Follow it in the Claude app on your phone. Back at the Mac, **Continue here** (or `/cloud back`) fetches the branch, reads what the cloud did, removes the hand-off files and deletes the GitHub branch (asks first). |
 | `/learned [now]` | What it has learned about how you work. `now` reads recent chats straight away. |
 | `/handoff` | Writes a `context.md` summary of this chat and offers to continue in a new chat that starts from it. This also happens on its own when a chat's context passes 80% (`context.handoff_at` in `harness.config.yaml`). |
+| `/model [name]` | Change this tab's model by name: `/model sonnet`, `/model fable 5.2`, `/model gpt astra`. Alone it lists them. |
 | `/models` | Pick the model for each role, and which models the model picker offers. Saved to `harness.config.yaml`. |
 | `/fork [title]` | Copies this chat and opens the copy in a **new terminal window** (tmux, macOS Terminal or iTerm, Windows Terminal, or a Linux terminal). `--here` switches to the copy in place instead. |
 | `/btw <q>` | Asks a side question on a throwaway copy of the chat. Works while a turn is running and never changes the main chat. |

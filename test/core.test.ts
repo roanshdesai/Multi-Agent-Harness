@@ -996,3 +996,42 @@ test("attachments: files go to the model as paths; the chat shows their names; m
     delete process.env.FAKE_CODEX_LOG;
   }
 });
+
+test("model picker: models listed only under an alias keep their name; the Default row doesn't name one", async () => {
+  const { pickerModels } = await import("../src/session.js");
+  const got = pickerModels([
+    { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)" },
+    { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5" },
+    { value: "claude-fable-5-2", resolvedModel: "claude-fable-5-2", displayName: "Fable 5.2" },
+    { value: "sonnet", resolvedModel: "claude-sonnet-5-5", displayName: "Sonnet 5.5" },
+    { value: "claude-sonnet-5", resolvedModel: "claude-sonnet-5", displayName: "Sonnet 5" },
+  ]);
+  assert.deepEqual(got, [
+    { value: "claude-opus-5-5", displayName: "Opus 5.5" },
+    { value: "claude-fable-5-2", displayName: "Fable 5.2" },
+    { value: "claude-sonnet-5-5", displayName: "Sonnet 5.5" },
+    { value: "claude-sonnet-5", displayName: "Sonnet 5" },
+  ]);
+});
+
+test("project context: pinned files and links per project go into the chat's instructions", async () => {
+  const { loadConfig } = await import("../src/config.js");
+  const { saveProjects } = await import("../src/projects.js");
+  const PC = await import("../src/project-context.js");
+  const cfg = loadConfig(process.cwd());
+  cfg.root = mkdtempSync(join(tmpdir(), "root-"));
+  const a = mkdtempSync(join(tmpdir(), "pa-"));
+  const b = mkdtempSync(join(tmpdir(), "pb-"));
+  saveProjects(cfg, { groups: [{ name: "G", projects: [{ name: "A", path: a, bank: "bank-a" }, { name: "B", path: b, bank: "bank-b" }] }] });
+  const spec = join(a, "spec.md");
+  writeFileSync(spec, "# spec");
+  assert.equal(PC.contextBlock(cfg, a), "");
+  const saved = PC.saveContext(cfg, join(a, "src"), { files: [spec, spec, join(a, "gone.md")], links: [{ url: "https://example.com/figma", title: "Figma" }, { url: "not a url" }, { url: "https://example.com/figma" }] });
+  assert.equal(saved.files.length, 2); // de-duplicated
+  assert.deepEqual(saved.links, [{ url: "https://example.com/figma", title: "Figma" }]); // bad and repeated links dropped
+  const block = PC.contextBlock(cfg, a);
+  assert.match(block, new RegExp(`- ${spec.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.doesNotMatch(block, /gone\.md/); // missing files aren't offered to the agent
+  assert.match(block, /- Figma: https:\/\/example\.com\/figma/);
+  assert.equal(PC.contextBlock(cfg, b), ""); // another project doesn't get it
+});

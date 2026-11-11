@@ -61,6 +61,7 @@
               <button class="switch" id="fastBtn" hidden title="Fast mode for this GPT tab: about 2x speed, uses more of your ChatGPT plan (/fast)"><i></i>Fast</button>
             </label>
             <button class="switch" id="verifyBtn" title="Fable checks delegated work before you see it"><i></i>Verify</button>
+            <button class="text-btn" id="ctxBtn" title="Files and links pinned to this project; every chat here gets them">context</button>
             <button class="text-btn" id="btwBtn" title="Side question (/btw)">btw</button>
             <button class="text-btn" id="forkBtn" title="Fork into a new window (/fork)">fork</button>
           </div>
@@ -87,6 +88,11 @@
         </footer>
       </main>
 
+      <aside class="ctx-panel" id="ctxPanel" hidden>
+        <div class="btw-head"><span>Project context</span><button class="icon" id="ctxClose" aria-label="Close">×</button></div>
+        <p class="btw-sub" id="ctxSub">Pinned to this project. Every chat here gets them, and agents open them when they're relevant.</p>
+        <div class="ctx-body" id="ctxBody"></div>
+      </aside>
       <aside class="btw-panel" id="btwPanel" hidden>
         <div class="btw-head"><span>By the way</span><button class="icon" id="btwClose" aria-label="Close">×</button></div>
         <p class="btw-sub">Side questions. The task doesn't see these.</p>

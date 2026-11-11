@@ -52,7 +52,7 @@ export const HARNESS_COMMANDS: CommandInfo[] = [
   { name: "/cloud", args: "[back]", description: "Send this task to a Claude cloud session (follow it on your phone); 'back' continues its work here", group: "Harness" },
   { name: "/handoff", description: "Write a context.md summary of this chat and continue in a new chat from it", group: "Harness" },
   { name: "/models", description: "Choose the model for each role and what the model picker offers", group: "Harness" },
-  { name: "/model", args: "[id]", description: "Change this tab's model, Claude or GPT", group: "Harness" },
+  { name: "/model", args: "[name]", description: "Change this tab's model, e.g. /model sonnet, /model fable 5.2, /model gpt astra; alone it lists them", group: "Harness" },
   { name: "/verify", args: "on | off", description: "Turn the verifier on or off", group: "Harness" },
   { name: "/eval", args: "[filter]", description: "Run the eval suite", group: "Harness" },
   { name: "/help", description: "All commands, including skills and plugins", group: "Harness" },
