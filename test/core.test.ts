@@ -860,7 +860,9 @@ test("/cloud: branch, secrets, public repos, send to the cloud and bring the wor
   const scrubbed = C.scrubSecrets("key sk-ant-abcdefghijklmnopqrstu and ghp_abcdefghijklmnopqrstuvwxyz12 password: hunter2xyz https://me:pw123@github.com/x");
   assert.doesNotMatch(scrubbed, /sk-ant-abc|ghp_abc|hunter2xyz|pw123/);
   assert.deepEqual(C.parseCloudStart('noise\n{"ok":true,"session_id":"session_a","url":"https://claude.ai/code/session_a"}'), { sessionId: "session_a", url: "https://claude.ai/code/session_a" });
-  assert.deepEqual(C.parseCloudStart("Session ID: session_b\nView: https://claude.ai/code/session_b?from=cli"), { sessionId: "session_b", url: "https://claude.ai/code/session_b?from=cli" });
+  assert.deepEqual(C.parseCloudStart("Session ID: session_b\nView: https://claude.ai/code/session_b?from=cli"), { sessionId: "session_b", url: "https://claude.ai/code/session_b" });
+  // What Claude Code 2.1.323 really prints for `claude --cloud "<text>"`.
+  assert.deepEqual(C.parseCloudStart("Created cloud session: Cloud smoke test docs\nView: https://claude.ai/code/session_01EPgu1jq9R2NhoveyoGyK5c?from=cli&m=0\nResume with: claude --teleport session_01EPgu1jq9R2NhoveyoGyK5c"), { sessionId: "session_01EPgu1jq9R2NhoveyoGyK5c", url: "https://claude.ai/code/session_01EPgu1jq9R2NhoveyoGyK5c" });
   const fakeFetch = (pub: boolean) => (async (url: string) => (String(url).includes("api.github.com") ? new Response(JSON.stringify({ private: !pub }), { status: pub ? 200 : 404 }) : new Response("{}", { status: 500 }))) as unknown as typeof fetch;
   assert.equal(await C.isPublicRepo("o", "r", fakeFetch(true)), true);
   assert.equal(await C.isPublicRepo("o", "r", fakeFetch(false)), false);
@@ -897,7 +899,10 @@ test("/cloud: branch, secrets, public repos, send to the cloud and bring the wor
     assert.match(readFileSync(join(work, "a.txt"), "utf8"), /unfinished/);
     assert.ok(!existsSync(join(work, ".cloud")));
 
-    const r = await C.sendToCloud(cfg, work, "Finish the feature", "Done: step 1. Left: step 2.", yes, async () => true, { fetcher: fakeFetch(false), now: new Date(2026, 10, 10) });
+    process.env.FAKE_CLAUDE_503 = join(base, "503-once");
+    const r = await C.sendToCloud(cfg, work, "Finish the feature", "Done: step 1. Left: step 2.", yes, async () => true, { fetcher: fakeFetch(false), now: new Date(2026, 10, 10), retryDelayMs: 10 });
+    delete process.env.FAKE_CLAUDE_503;
+    assert.ok(existsSync(join(base, "503-once")), "the first start got a 503 and was retried");
     assert.equal(r.branch, "cloud/2026-11-10-finish-the-feature");
     assert.equal(r.sessionId, "session_test123");
     assert.equal(g(work, "rev-parse", "--abbrev-ref", "HEAD"), "main"); // the Mac is back on its branch
@@ -906,8 +911,8 @@ test("/cloud: branch, secrets, public repos, send to the cloud and bring the wor
     assert.ok(!files.includes(".env"), ".env must never be pushed");
     assert.match(asked[0], /Push the branch cloud\/2026-11-10-finish-the-feature/);
     const claudeArgs = JSON.parse(readFileSync(join(base, "claude.log"), "utf8").trim().split("\n").pop()!);
-    assert.deepEqual(claudeArgs.slice(0, 4), ["-p", "--output-format", "json", "--cloud"]);
-    assert.match(claudeArgs[4], /read \.cloud\/context\.md/);
+    assert.deepEqual(claudeArgs.slice(0, 1), ["--cloud"]);
+    assert.match(claudeArgs[1], /read \.cloud\/context\.md/);
 
     // The cloud works on the branch and writes its progress.
     const cloudClone = join(base, "cloud");

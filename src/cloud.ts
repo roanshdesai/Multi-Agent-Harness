@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HarnessConfig } from "./config.js";
@@ -154,7 +154,7 @@ export async function sendToCloud(
   handoffText: string,
   ask: Ask,
   confirmPublic: (repo: string) => Promise<boolean>,
-  opts: { fetcher?: typeof fetch; now?: Date } = {},
+  opts: { fetcher?: typeof fetch; now?: Date; retryDelayMs?: number } = {},
 ): Promise<SendResult> {
   if ((await git(cwd, "rev-parse", "--is-inside-work-tree")).code !== 0) throw new Error("This folder isn't a git repository, so it can't go to the cloud.");
   const gh = await githubRepo(cwd);
@@ -203,17 +203,48 @@ export async function sendToCloud(
   const state: CloudState = { branch, base, cwd, task, at: Date.now(), memory };
   const instructions = cloudInstructions(branch, task, memory);
   const bin = claudeBin() ?? "claude";
-  const r = await run(bin, ["-p", "--output-format", "json", "--cloud", instructions], cwd, 180_000);
-  const parsed = parseCloudStart(r.out + "\n" + r.err);
+  // Claude's cloud service sometimes answers 503 for a moment; try again before giving up.
+  let out = "";
+  for (let i = 0; i < 3; i++) {
+    if (i) await new Promise((r) => setTimeout(r, opts.retryDelayMs ?? 20_000));
+    out = await startCloudSession(bin, instructions, cwd);
+    if (!/status code 5\d\d/.test(out)) break;
+  }
+  const parsed = parseCloudStart(out);
   if (parsed.sessionId || parsed.url) {
     Object.assign(state, parsed);
     await git(cwd, "switch", "-q", base); // the work lives on the branch now; the Mac goes back
     return { ...state, note: `Sent to the cloud on ${branch}.` };
   }
   // Couldn't start it here: open it in a terminal window, where Claude Code shows the link.
+  const why = out.match(/Error:[^\n]*/)?.[0]?.trim();
   openCommandInTerminal([bin, "--cloud", instructions], cwd, "cloud");
   state.inTerminal = true;
-  return { ...state, note: `The branch ${branch} is pushed. The cloud session is starting in a terminal window, which shows its link. Stay on ${branch} until it has started, then switch back to ${base}.` };
+  return { ...state, note: `The branch ${branch} is pushed.${why ? ` Starting the cloud session here failed (${why}), so it's being tried again in a terminal window.` : " The cloud session is starting in a terminal window."} The terminal shows its link. Stay on ${branch} until it has started, then switch back to ${base}.` };
+}
+
+/**
+ * Run `claude --cloud "<text>"`: it creates the session, prints its id and
+ * link, and exits. It refuses to run without a terminal ("--cloud requires an
+ * interactive terminal"), so on macOS it gets a pseudo-terminal from
+ * `script`. (With -p it would run a local turn instead and start nothing.)
+ * Returns the output with terminal escape codes removed.
+ */
+export function startCloudSession(bin: string, instructions: string, cwd: string, timeoutMs = 180_000): Promise<string> {
+  const [cmd, args] = process.platform === "darwin" ? ["script", ["-q", "/dev/null", bin, "--cloud", instructions]] : [bin, ["--cloud", instructions]];
+  return new Promise((resolve) => {
+    let out = "";
+    const child = spawn(cmd as string, args as string[], { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    child.stdout!.on("data", (d) => (out += d));
+    child.stderr!.on("data", (d) => (out += d));
+    const done = () => {
+      clearTimeout(timer);
+      resolve(out.replace(/\x1b\][^\x07]*\x07/g, "").replace(/\x1b[[()][0-9;?<>=]*[A-Za-z]|\x1b[78]|[\x0e\x0f]|\^D\x08\x08/g, "").replace(/\r/g, ""));
+    };
+    child.on("error", (e) => ((out += `\nError: ${e.message}`), done()));
+    child.on("close", done);
+  });
 }
 
 /** Session id and link from `claude --cloud` output (JSON or text). */
@@ -229,7 +260,7 @@ export function parseCloudStart(out: string): { sessionId?: string; url?: string
     }
   }
   const id = out.match(/\b((?:session|cse)_[A-Za-z0-9]+)\b/)?.[1];
-  const url = out.match(/https:\/\/claude\.ai\/code\/[^\s"']+/)?.[0];
+  const url = out.match(/https:\/\/claude\.ai\/code\/[^\s"'?]+/)?.[0];
   return { ...(id && { sessionId: id }), ...(url && { url }) };
 }
 
